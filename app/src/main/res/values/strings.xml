@@ -1,3 +1,7 @@
 <resources>
-    <string name="app_name">test_microTT</string>
+<string name="app_name">微头条</string>
+<string name="wtt_title_publish">发头条</string>
+<string name="wtt_btn_publish">发布</string>
+<string name="wtt_hint_input">分享你的新鲜事...</string>
+<string name="wtt_status_publishing">正在发布中</string>
 </resources>

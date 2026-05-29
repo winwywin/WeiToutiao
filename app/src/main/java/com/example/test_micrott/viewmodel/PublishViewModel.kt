@@ -3,8 +3,8 @@ package com.example.test_micrott.viewmodels
 import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
-import com.example.test_micrott.models.PublishIntent
-import com.example.test_micrott.models.PublishState
+import com.example.test_micrott.model.PublishIntent
+import com.example.test_micrott.model.PublishState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

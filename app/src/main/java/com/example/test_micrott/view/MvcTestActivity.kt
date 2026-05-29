@@ -58,12 +58,29 @@ class MvcTestActivity : AppCompatActivity() {
         ActivityResultContracts.PickMultipleVisualMedia(9) // 题目硬性要求：最大上限 9 张
     ) { uris ->
         if (uris.isNotEmpty()) {
+            Log.d(TAG, "==== 今日头条沙盒测试：本次新选中图片 ${uris.size} 张 ====")
 
-            // day3：把拿到的只读 uris 变成可变的 ArrayList 塞给变量
-            selectedImageUris = ArrayList(uris)
-            Log.d(TAG, "==== 今日头条沙盒测试：成功选中图片 ====")
-            // 💥 关键一笔：选图一回来，立即派发给适配器，让界面长出九宫格！
+            // day3:1. 【核心修正】：不要直接赋值，而是用循环“增量追加 + 去重”
+            for (uri in uris) {
+                // 如果全局列表里还没这张图，才加进去，防止重复
+                if (!selectedImageUris.contains(uri)) {
+                    selectedImageUris.add(uri)
+                }
+            }
+            // 2. 【上限硬拦截】：如果追加完超过了 9 张，强行物理切除多余的
+            if (selectedImageUris.size > 9) {
+                Log.w(TAG, "警告：总数超过9张！强行截断，只保留前9张")
+                while (selectedImageUris.size > 9) {
+                    selectedImageUris.removeAt(selectedImageUris.size - 1)
+                }
+            }
+            // 3. 关键一笔：选图追加/截断完成后，派发给适配器，让界面长出九宫格！
             imageGridAdapter.updateData(selectedImageUris)
+            // 打印最新累积的图片日志，方便汇报时在 Logcat 里向导师展示
+            selectedImageUris.forEachIndexed { index, uri ->
+                Log.d(TAG, "当前图片总池[$index] Uri: $uri")
+            }
+            Log.d(TAG, "======================================")
             //day2:把uris传入内部，输出图片的uris
 //            selectedImageUris = uris
 //            Log.d(TAG, "==== 今日头条沙盒测试：成功选中图片 ====")
