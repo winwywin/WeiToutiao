@@ -1,6 +1,5 @@
 package com.example.test_micrott.view
 
-import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
@@ -20,6 +19,7 @@ import android.widget.TextView
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.graphics.toColorInt
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.test_micrott.R
@@ -34,7 +34,7 @@ import com.example.test_micrott.R
  */
 class MvcTestActivity : AppCompatActivity() {
 
-    private val TAG = "PhotoSandbox"
+    private val tag = "PhotoSandbox"
 
     // 声明布局中的核心控件
     private lateinit var etEditor: EditText
@@ -50,15 +50,15 @@ class MvcTestActivity : AppCompatActivity() {
 //    private var selectedImageUris = listOf<android.net.Uri>()
     // day3：把你昨天的 listOf() 升级为 ArrayList()
     // 只有换成可变的 ArrayList，后面点击右上角小红叉时才能执行 remove 删图！
-    private var selectedImageUris = ArrayList<android.net.Uri>()
+    private var selectedImageUris = ArrayList<Uri>()
 
     // day2:【核心 API 攻坚 1】：注册现代原生相册选择器回调
     // 拒绝过期的 startActivityForResult，利用最新的 ActivityResultContracts 机制
     private val pickMultipleMedia = registerForActivityResult(
-        ActivityResultContracts.PickMultipleVisualMedia(9) // 题目硬性要求：最大上限 9 张
+        ActivityResultContracts.PickMultipleVisualMedia(9), // 题目硬性要求：最大上限 9 张
     ) { uris ->
         if (uris.isNotEmpty()) {
-            Log.d(TAG, "==== 今日头条沙盒测试：本次新选中图片 ${uris.size} 张 ====")
+            Log.d(tag, "==== 今日头条沙盒测试：本次新选中图片 ${uris.size} 张 ====")
 
             // day3:1. 【核心修正】：不要直接赋值，而是用循环“增量追加 + 去重”
             for (uri in uris) {
@@ -69,7 +69,7 @@ class MvcTestActivity : AppCompatActivity() {
             }
             // 2. 【上限硬拦截】：如果追加完超过了 9 张，强行物理切除多余的
             if (selectedImageUris.size > 9) {
-                Log.w(TAG, "警告：总数超过9张！强行截断，只保留前9张")
+                Log.w(tag, "警告：总数超过9张！强行截断，只保留前9张")
                 while (selectedImageUris.size > 9) {
                     selectedImageUris.removeAt(selectedImageUris.size - 1)
                 }
@@ -78,20 +78,20 @@ class MvcTestActivity : AppCompatActivity() {
             imageGridAdapter.updateData(selectedImageUris)
             // 打印最新累积的图片日志，方便汇报时在 Logcat 里向导师展示
             selectedImageUris.forEachIndexed { index, uri ->
-                Log.d(TAG, "当前图片总池[$index] Uri: $uri")
+                Log.d(tag, "当前图片总池[$index] Uri: $uri")
             }
-            Log.d(TAG, "======================================")
+            Log.d(tag, "======================================")
             //day2:把uris传入内部，输出图片的uris
 //            selectedImageUris = uris
-//            Log.d(TAG, "==== 今日头条沙盒测试：成功选中图片 ====")
+//            Log.d(tag, "==== 今日头条沙盒测试：成功选中图片 ====")
 //            uris.forEachIndexed { index, uri ->
 //                // 在 Logcat 里打印出绝对清晰的路径，完成今日数据拉通检验
-//                Log.d(TAG, "图片[$index] Uri 路径: $uri")
+//                Log.d(tag, "图片[$index] Uri 路径: $uri")
 //            }
-//            Log.d(TAG, "======================================")
+//            Log.d(tag, "======================================")
 
         } else {
-            Log.d(TAG, "用户取消了相册选择")
+            Log.d(tag, "用户取消了相册选择")
         }
         // 每次选图状态改变，重新检查一次发布按钮是否需要激活
         updatePublishButtonState()
@@ -128,7 +128,7 @@ class MvcTestActivity : AppCompatActivity() {
                     updatePublishButtonState() // 顺便联动更新右上角按钮状态
                 }
             },
-            onMoveListener = { _, _ -> /* MVC 沙盒暂不处理拖拽 */ }
+            onMoveListener = { _, _ -> /* MVC 沙盒暂不处理拖拽 */ },
         )
         rvImages.adapter = imageGridAdapter // 给控件穿上适配器外衣
 
@@ -144,13 +144,13 @@ class MvcTestActivity : AppCompatActivity() {
         // 【功能交互 1】：点击【📷 照片】按钮，唤起原生不弹窗隐私合规相册
         barPhoto.setOnClickListener {
             pickMultipleMedia.launch(
-                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
             )
         }
 
         // 【功能交互 2】：点击【# 话题】按钮，在光标处插入蓝色高亮富文本，并防错位控强推光标
         barTopic.setOnClickListener {
-            insertTopicIntoEditor(" #请输入话题# ")
+            insertTopicIntoEditor()
         }
         // day3：在 onCreate 的最末尾，把今天最核心的話题删除拦截引擎启动起来
         setupTopicTokenGuard()
@@ -159,7 +159,7 @@ class MvcTestActivity : AppCompatActivity() {
     /**
      * 富文本核心算法：在当前光标处无错位插入高亮变色文本（对齐 A3 核心）
      */
-    private fun insertTopicIntoEditor(topicText: String) {
+    private fun insertTopicIntoEditor(topicText: String = " #请输入话题# ") {
         // 1. 获取当前输入框中的文本对象
         val editable = etEditor.text ?: return
 
@@ -174,7 +174,7 @@ class MvcTestActivity : AppCompatActivity() {
         // 3. 构建高亮富文本对象
         val spannableStringBuilder = SpannableStringBuilder(topicText)
         spannableStringBuilder.setSpan(
-            ForegroundColorSpan(Color.parseColor("#2A62FF")), // 今日头条官方微头条经典蓝色
+            ForegroundColorSpan("#2A62FF".toColorInt()), // 今日头条官方微头条经典蓝色
             0,
             topicText.length,
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
@@ -200,10 +200,10 @@ class MvcTestActivity : AppCompatActivity() {
         btnPublish.isEnabled = canPublish
         if (canPublish) {
             // 激活状态：大厂高亮红（这里暂用标准的 Android 红色，后续可进修视觉）
-            btnPublish.setBackgroundColor(Color.parseColor("#F85149"))
+            btnPublish.setBackgroundColor("#F85149".toColorInt())
         } else {
             // 置残状态：工业死灰色
-            btnPublish.setBackgroundColor(Color.parseColor("#A8A8A8"))
+            btnPublish.setBackgroundColor("#A8A8A8".toColorInt())
         }
     }
     // day3：把这个话题守卫引擎，当作新方法加进 Activity 肚子里
@@ -237,7 +237,7 @@ class MvcTestActivity : AppCompatActivity() {
             for (span in spans) {
                 val start = editable.getSpanStart(span)
                 val end = editable.getSpanEnd(span)
-                if (position > start && position < end) {
+                if (position in (start + 1)..<end) {
                     if (position < (start + end) / 2) etEditor.setSelection(start) else etEditor.setSelection(end)
                     break
                 }
@@ -260,7 +260,7 @@ class MvcTestActivity : AppCompatActivity() {
                         val spanEnd = editable.getSpanEnd(span)
 
                         // 1. 如果是纯光标闪烁（start == end）且陷在了话题肚子里
-                        if (start == end && start > spanStart && start < spanEnd) {
+                        if (start == end && (start > spanStart) && (start < spanEnd)) {
                             if (start < (spanStart + spanEnd) / 2) {
                                 etEditor.setSelection(spanStart) // 强行吸附到左边
                             } else {
@@ -276,7 +276,7 @@ class MvcTestActivity : AppCompatActivity() {
                             var newEnd = end
                             if (start > spanStart && start < spanEnd) newStart = spanStart
                             if (end > spanStart && end < spanEnd) newEnd = spanEnd
-                            if (newStart != start || newEnd != end) {
+                            if ((newStart != start) || (newEnd != end)) {
                                 etEditor.setSelection(newStart, newEnd) // 强行校正选区
                                 break
                             }

@@ -4,6 +4,7 @@ package com.example.test_micrott.view
 // 1. Android 系统与 Jetpack 官方核心依赖库导入区
 // ==========================================
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.text.SpannableStringBuilder
 import android.text.Spanned
@@ -14,6 +15,7 @@ import android.view.View
 import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.graphics.toColorInt
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
@@ -50,7 +52,7 @@ class MainActivity : AppCompatActivity() {
     private var wasLoading = false
 
     // Day 8 新增：缓存上次图片列表引用，避免每帧打字触发 notifyDataSetChanged
-    private var lastImageList: List<android.net.Uri> = emptyList()
+    private var lastImageList: List<Uri> = emptyList()
 
     // Day 9 升级：动态上限 PhotoPicker。每次 launch(pendingImageSlots) 传入剩余名额
     private val pickMultipleMedia = registerForActivityResult(
@@ -227,8 +229,8 @@ class MainActivity : AppCompatActivity() {
         // 3. 发布按钮颜色
         // ================================================================
         binding.btnPublish.setBackgroundColor(
-            if (state.isPublishButtonEnabled && !loading) Color.parseColor("#F85149")
-            else Color.parseColor("#A8A8A8")
+            if (state.isPublishButtonEnabled && !loading) "#F85149".toColorInt()
+            else "#A8A8A8".toColorInt()
         )
 
         // ================================================================
@@ -268,7 +270,7 @@ class MainActivity : AppCompatActivity() {
     // 话题插入
     // ========================================================================
 
-    private fun insertTopicIntoEditor(topicText: String) {
+    private fun insertTopicIntoEditor(topicText: String = " #请输入话题# ") {
         val editable = binding.ktg.text ?: return
         var start = binding.ktg.selectionStart
         var end = binding.ktg.selectionEnd
@@ -280,7 +282,7 @@ class MainActivity : AppCompatActivity() {
 
         val spannableStringBuilder = SpannableStringBuilder(topicText)
         spannableStringBuilder.setSpan(
-            ForegroundColorSpan(Color.parseColor("#2A62FF")),
+            ForegroundColorSpan("#2A62FF".toColorInt()),
             0, topicText.length,
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
         )
@@ -302,7 +304,7 @@ class MainActivity : AppCompatActivity() {
         val pattern = Regex("#[^#]*#")
         pattern.findAll(text).forEach { match ->
             editable.setSpan(
-                ForegroundColorSpan(Color.parseColor("#2A62FF")),
+                ForegroundColorSpan("#2A62FF".toColorInt()),
                 match.range.first,
                 match.range.last + 1,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
@@ -344,7 +346,7 @@ class MainActivity : AppCompatActivity() {
             for (span in spans) {
                 val start = editable.getSpanStart(span)
                 val end = editable.getSpanEnd(span)
-                if (position > start && position < end) {
+                if (position in (start + 1)..<end) {
                     binding.ktg.setSelection(if (position < (start + end) / 2) start else end)
                     break
                 }

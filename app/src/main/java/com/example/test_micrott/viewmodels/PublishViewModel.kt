@@ -40,7 +40,7 @@ class PublishViewModel(
     // 📺 对外只读暴露：View 层（Activity）只能单向 collect 监听这个流
     val state: StateFlow<PublishState> = _state.asStateFlow()
 
-    private val TAG = "MVI_FRAMEWORK"
+    private val tag = "MVI_FRAMEWORK"
 
     // ========================================================================
     // Day 6 新增：SavedStateHandle 状态恢复
@@ -52,19 +52,19 @@ class PublishViewModel(
      */
     private fun restoreState(): PublishState {
         val savedText = savedStateHandle.get<String>(KEY_TEXT) ?: ""
-        val savedImages = savedStateHandle.get<ArrayList<Uri>>(KEY_IMAGES) ?: emptyList<Uri>()
+        val savedImages = savedStateHandle.get<ArrayList<Uri>>(KEY_IMAGES) ?: emptyList()
         val savedLoading = savedStateHandle.get<Boolean>(KEY_LOADING) ?: false
         val savedButtonEnabled = savedStateHandle.get<Boolean>(KEY_BUTTON_ENABLED) ?: false
 
         if (savedText.isNotEmpty() || savedImages.isNotEmpty()) {
-            Log.d(TAG, "🔄 [ViewModel] SavedStateHandle 恢复 -> text=${savedText.length}字, images=${savedImages.size}张")
+            Log.d(tag, "🔄 [ViewModel] SavedStateHandle 恢复 -> text=${savedText.length}字, images=${savedImages.size}张")
         }
 
         return PublishState(
             text = savedText,
             selectedImages = savedImages,
             isLoading = savedLoading,
-            isPublishButtonEnabled = savedButtonEnabled
+            isPublishButtonEnabled = savedButtonEnabled,
         )
     }
 
@@ -87,7 +87,7 @@ class PublishViewModel(
      * View 层向 ViewModel 打小报告的唯一物理入口
      */
     fun sendIntent(intent: PublishIntent) {
-        Log.d(TAG, "🧠 [ViewModel] 成功拦截到用户意图: $intent")
+        Log.d(tag, "🧠 [ViewModel] 成功拦截到用户意图: $intent")
 
         // 利用 sealed class 的完备性强制分支检查，漏写任何一个意图直接编译报错
         when (intent) {
@@ -118,12 +118,12 @@ class PublishViewModel(
 
         val newState = _state.value.copy(
             text = newText,
-            isPublishButtonEnabled = isButtonEnabled
+            isPublishButtonEnabled = isButtonEnabled,
         )
         _state.value = newState
         // ⚠️ 不再 persistState — 见上方注释
 
-        Log.d(TAG, "📺 [ViewModel] 状态增量演算完成 [TextChanged] -> 吐出新State")
+        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [TextChanged] -> 吐出新State")
     }
 
     /**
@@ -137,12 +137,12 @@ class PublishViewModel(
         val safetyImages = if (currentImages.size > 9) currentImages.subList(0, 9) else currentImages
 
         val newState = _state.value.copy(
-            selectedImages = safetyImages
+            selectedImages = safetyImages,
         )
         _state.value = newState
         persistState(newState)
 
-        Log.d(TAG, "📺 [ViewModel] 状态增量演算完成 [ImagesPicked] -> 当前图片数: ${safetyImages.size}")
+        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [ImagesPicked] -> 当前图片数: ${safetyImages.size}")
     }
 
     /**
@@ -157,12 +157,12 @@ class PublishViewModel(
 
             val newState = _state.value.copy(
                 selectedImages = currentImages,
-                isPublishButtonEnabled = isButtonEnabled
+                isPublishButtonEnabled = isButtonEnabled,
             )
             _state.value = newState
             persistState(newState)
 
-            Log.d(TAG, "📺 [ViewModel] 状态增量演算完成 [RemoveImage] -> 删除了索引 $index 的图片")
+            Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [RemoveImage] -> 删除了索引 $index 的图片")
         }
     }
 
@@ -179,18 +179,18 @@ class PublishViewModel(
      */
     private fun handleClickPublish() {
         if (_state.value.isLoading) {
-            Log.d(TAG, "⛔ [ViewModel] 发布中，忽略重复点击")
+            Log.d(tag, "⛔ [ViewModel] 发布中，忽略重复点击")
             return
         }
 
         val newState = _state.value.copy(
             isLoading = true,
-            isPublishButtonEnabled = false
+            isPublishButtonEnabled = false,
         )
         _state.value = newState
         persistState(newState)
 
-        Log.d(TAG, "📺 [ViewModel] 状态增量演算完成 [ClickPublish] -> 进入 Loading 发布中状态")
+        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [ClickPublish] -> 进入 Loading 发布中状态")
 
         viewModelScope.launch {
             delay(2000) // 模拟网络请求
@@ -200,7 +200,7 @@ class PublishViewModel(
             _state.value = resetState
             persistState(resetState)
 
-            Log.d(TAG, "✅ [ViewModel] 发布完成，表单已重置")
+            Log.d(tag, "✅ [ViewModel] 发布完成，表单已重置")
         }
     }
 
@@ -217,7 +217,7 @@ class PublishViewModel(
             _state.value = newState
             persistState(newState)
         }
-        Log.d(TAG, "📺 [ViewModel] 状态增量演算完成 [InsertTopic] -> 话题: $topicText（文本由TextChanged同步）")
+        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [InsertTopic] -> 话题: $topicText（文本由TextChanged同步）")
     }
 
     /**
@@ -225,7 +225,7 @@ class PublishViewModel(
      */
     private fun handleMoveImage(from: Int, to: Int) {
         val currentImages = _state.value.selectedImages.toMutableList()
-        if (from !in currentImages.indices || to !in currentImages.indices) return
+        if ((from !in currentImages.indices) || (to !in currentImages.indices)) return
         if (from == to) return
 
         val moved = currentImages.removeAt(from)
@@ -235,6 +235,6 @@ class PublishViewModel(
         _state.value = newState
         persistState(newState)
 
-        Log.d(TAG, "📺 [ViewModel] 状态增量演算完成 [MoveImage] -> $from ↔ $to")
+        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [MoveImage] -> $from ↔ $to")
     }
 }

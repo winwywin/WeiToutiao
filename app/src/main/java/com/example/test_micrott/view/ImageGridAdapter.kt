@@ -21,7 +21,7 @@ class ImageGridAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         const val TYPE_ADD_BUTTON = 1
     }
 
-    private val MAX_IMAGE_COUNT = 9
+    private val maxImageCount = 9
 
     private var mSelectedImages = ArrayList<Uri>()
     private var mAddListener: (() -> Unit)? = null
@@ -31,7 +31,7 @@ class ImageGridAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     fun setListeners(
         onAddClickListener: () -> Unit,
         onDeleteClickListener: (Int) -> Unit,
-        onMoveListener: (Int, Int) -> Unit
+        onMoveListener: (Int, Int) -> Unit,
     ) {
         this.mAddListener = onAddClickListener
         this.mDeleteListener = onDeleteClickListener
@@ -49,7 +49,7 @@ class ImageGridAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      * 拖拽排序：交换数据源中的两个位置，并通知回调 → ViewModel
      */
     fun onItemMove(fromPosition: Int, toPosition: Int) {
-        if (fromPosition !in mSelectedImages.indices || toPosition !in mSelectedImages.indices) return
+        if ((fromPosition !in mSelectedImages.indices) || (toPosition !in mSelectedImages.indices)) return
         if (fromPosition == toPosition) return
 
         if (fromPosition < toPosition) {
@@ -66,11 +66,11 @@ class ImageGridAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     }
 
     override fun getItemCount(): Int {
-        return if (mSelectedImages.size < MAX_IMAGE_COUNT) mSelectedImages.size + 1 else MAX_IMAGE_COUNT
+        return if (mSelectedImages.size < maxImageCount) mSelectedImages.size + 1 else maxImageCount
     }
 
     override fun getItemViewType(position: Int): Int {
-        return if (position == mSelectedImages.size && mSelectedImages.size < MAX_IMAGE_COUNT) {
+        return if (position == mSelectedImages.size && mSelectedImages.size < maxImageCount) {
             TYPE_ADD_BUTTON
         } else {
             TYPE_IMAGE

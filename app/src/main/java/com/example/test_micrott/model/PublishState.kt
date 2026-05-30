@@ -8,8 +8,8 @@ import android.net.Uri
  * 2. 内部属性必须全部用 val 修饰，确保状态只读、线程安全，彻底消灭并发导致的状态冲突。
  */
 data class PublishState(
-    val text: String = "",                         // 当前输入框的富文本内容
-    val selectedImages: List<Uri> = emptyList(),    // 已选中的图片 URI 列表（对应九宫格）
-    val isLoading: Boolean = false,                // 是否处于发布/压缩的 Loading 遮罩状态
-    val isPublishButtonEnabled: Boolean = false     // 发布按钮的亮灭可用状态
+    val text: String = "",
+    val selectedImages: List<Uri> = emptyList(),
+    val isLoading: Boolean = false,
+    val isPublishButtonEnabled: Boolean = false,
 )
