@@ -7,25 +7,35 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.test_micrott.R
+import java.util.Collections
 
 /**
  * MVI 主项目九宫格适配器
  * 职责：纯渲染，不持有业务状态，数据由 PublishState.selectedImages 驱动
- * 接口对齐 MVC 沙盒的 ImageGridAdapter，支持加号按钮和删除按钮回调
+ * Day 7 升级：支持拖拽排序 + ViewHolder 类型暴露（供 ItemTouchHelper 过滤加号）
  */
 class ImageGridAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
-    private val TYPE_IMAGE = 0
-    private val TYPE_ADD_BUTTON = 1
+    companion object {
+        const val TYPE_IMAGE = 0
+        const val TYPE_ADD_BUTTON = 1
+    }
+
     private val MAX_IMAGE_COUNT = 9
 
     private var mSelectedImages = ArrayList<Uri>()
     private var mAddListener: (() -> Unit)? = null
     private var mDeleteListener: ((Int) -> Unit)? = null
+    private var mOnMoveListener: ((Int, Int) -> Unit)? = null
 
-    fun setListeners(onAddClickListener: () -> Unit, onDeleteClickListener: (Int) -> Unit) {
+    fun setListeners(
+        onAddClickListener: () -> Unit,
+        onDeleteClickListener: (Int) -> Unit,
+        onMoveListener: (Int, Int) -> Unit
+    ) {
         this.mAddListener = onAddClickListener
         this.mDeleteListener = onDeleteClickListener
+        this.mOnMoveListener = onMoveListener
     }
 
     fun updateData(images: List<Uri>) {
@@ -34,6 +44,26 @@ class ImageGridAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     }
 
     fun getImages(): List<Uri> = mSelectedImages
+
+    /**
+     * 拖拽排序：交换数据源中的两个位置，并通知回调 → ViewModel
+     */
+    fun onItemMove(fromPosition: Int, toPosition: Int) {
+        if (fromPosition !in mSelectedImages.indices || toPosition !in mSelectedImages.indices) return
+        if (fromPosition == toPosition) return
+
+        if (fromPosition < toPosition) {
+            for (i in fromPosition until toPosition) {
+                Collections.swap(mSelectedImages, i, i + 1)
+            }
+        } else {
+            for (i in fromPosition downTo toPosition + 1) {
+                Collections.swap(mSelectedImages, i, i - 1)
+            }
+        }
+        notifyItemMoved(fromPosition, toPosition)
+        mOnMoveListener?.invoke(fromPosition, toPosition)
+    }
 
     override fun getItemCount(): Int {
         return if (mSelectedImages.size < MAX_IMAGE_COUNT) mSelectedImages.size + 1 else MAX_IMAGE_COUNT

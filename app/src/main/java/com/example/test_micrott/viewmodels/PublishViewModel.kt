@@ -93,6 +93,7 @@ class PublishViewModel(
             is PublishIntent.RemoveImage -> handleRemoveImage(intent.index)
             is PublishIntent.ClickPublish -> handleClickPublish()
             is PublishIntent.InsertTopic -> handleInsertTopic(intent.topicText)
+            is PublishIntent.MoveImage -> handleMoveImage(intent.from, intent.to)
         }
     }
 
@@ -187,5 +188,23 @@ class PublishViewModel(
             persistState(newState)
         }
         Log.d(TAG, "📺 [ViewModel] 状态增量演算完成 [InsertTopic] -> 话题: $topicText（文本由TextChanged同步）")
+    }
+
+    /**
+     * 处理拖拽排序意图：交换列表中两个位置的图片
+     */
+    private fun handleMoveImage(from: Int, to: Int) {
+        val currentImages = _state.value.selectedImages.toMutableList()
+        if (from !in currentImages.indices || to !in currentImages.indices) return
+        if (from == to) return
+
+        val moved = currentImages.removeAt(from)
+        currentImages.add(to, moved)
+
+        val newState = _state.value.copy(selectedImages = currentImages)
+        _state.value = newState
+        persistState(newState)
+
+        Log.d(TAG, "📺 [ViewModel] 状态增量演算完成 [MoveImage] -> $from ↔ $to")
     }
 }

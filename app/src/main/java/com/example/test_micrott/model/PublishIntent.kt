@@ -23,4 +23,7 @@ sealed class PublishIntent {
 
     // 5. 用户点击底部工具栏的"# 话题"按钮，插入话题标签
     data class InsertTopic(val topicText: String) : PublishIntent()
+
+    // 6. 用户拖拽九宫格图片调整顺序
+    data class MoveImage(val from: Int, val to: Int) : PublishIntent()
 }

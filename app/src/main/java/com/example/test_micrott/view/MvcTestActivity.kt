@@ -127,7 +127,8 @@ class MvcTestActivity : AppCompatActivity() {
                     imageGridAdapter.updateData(selectedImageUris)
                     updatePublishButtonState() // 顺便联动更新右上角按钮状态
                 }
-            }
+            },
+            onMoveListener = { _, _ -> /* MVC 沙盒暂不处理拖拽 */ }
         )
         rvImages.adapter = imageGridAdapter // 给控件穿上适配器外衣
 
