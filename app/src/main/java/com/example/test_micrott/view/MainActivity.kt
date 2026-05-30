@@ -12,8 +12,6 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.widget.Toast
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
@@ -54,14 +52,13 @@ class MainActivity : AppCompatActivity() {
     // Day 8 新增：缓存上次图片列表引用，避免每帧打字触发 notifyDataSetChanged
     private var lastImageList: List<android.net.Uri> = emptyList()
 
-    // PhotoPicker 注册（max 9 由系统护栏兜底，实际由 pendingImageSlots 截断）
+    // Day 9 升级：动态上限 PhotoPicker。每次 launch(pendingImageSlots) 传入剩余名额
     private val pickMultipleMedia = registerForActivityResult(
-        ActivityResultContracts.PickMultipleVisualMedia(9)
+        PickMultipleVisualMediaDynamic()
     ) { uris ->
         if (uris.isNotEmpty()) {
-            val limited = if (uris.size > pendingImageSlots) uris.take(pendingImageSlots) else uris
-            Log.d(tag, "📷 [View] PhotoPicker 返回 ${uris.size} 张，当前剩余名额 $pendingImageSlots，实际接收 ${limited.size} 张")
-            viewModel.sendIntent(PublishIntent.ImagesPicked(limited))
+            Log.d(tag, "📷 [View] PhotoPicker 返回 ${uris.size} 张，当前剩余名额 $pendingImageSlots")
+            viewModel.sendIntent(PublishIntent.ImagesPicked(uris))
         } else {
             Log.d(tag, "用户取消了相册选择")
         }
@@ -136,7 +133,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Day 7 新增：启动相册前计算剩余名额，满 9 张不启动
+     * Day 9 升级：启动相册前计算剩余名额，动态传给 PickMultipleVisualMediaDynamic。
+     * 系统相册 UI 会显示正确的可选上限（如已有 2 张 → 显示"最多选择 7 张"）。
      */
     private fun tryPickPhotos() {
         val currentCount = imageGridAdapter.getImages().size
@@ -145,7 +143,8 @@ class MainActivity : AppCompatActivity() {
             Log.d(tag, "📷 [View] 已达 9 张上限，阻止相册启动")
             return
         }
-        pickMultipleMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        Log.d(tag, "📷 [View] 启动相册，剩余名额 $pendingImageSlots")
+        pickMultipleMedia.launch(pendingImageSlots)
     }
 
     // ========================================================================
@@ -159,6 +158,11 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnPublish.setOnClickListener {
             viewModel.sendIntent(PublishIntent.ClickPublish)
+        }
+
+        // Day 9 新增：左上角"取消"按钮
+        binding.btnBack.setOnClickListener {
+            finish()
         }
 
         binding.barTopic.setOnClickListener {
