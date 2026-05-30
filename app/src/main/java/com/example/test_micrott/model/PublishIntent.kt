@@ -18,6 +18,9 @@ sealed class PublishIntent {
     // 3. 用户点击九宫格图片右上角的小红叉（传入被删图片的索引位置）
     data class RemoveImage(val index: Int) : PublishIntent()
 
-    // 4. 用户点击右上角的“发布”按钮
+    // 4. 用户点击右上角的"发布"按钮
     object ClickPublish : PublishIntent()
+
+    // 5. 用户点击底部工具栏的"# 话题"按钮，插入话题标签
+    data class InsertTopic(val topicText: String) : PublishIntent()
 }

@@ -37,6 +37,7 @@ class PublishViewModel : ViewModel() {
             is PublishIntent.ImagesPicked -> handleImagesPicked(intent.uris)
             is PublishIntent.RemoveImage -> handleRemoveImage(intent.index)
             is PublishIntent.ClickPublish -> handleClickPublish()
+            is PublishIntent.InsertTopic -> handleInsertTopic(intent.topicText)
         }
     }
 
@@ -47,8 +48,8 @@ class PublishViewModel : ViewModel() {
         // 核心高低频过滤逻辑：只有当内容实质发生改变时，才允许执行 copy 并向下游倒灌
         if (_state.value.text == newText) return
 
-        // 核心联动业务计算：按钮亮灭判定（文本除去空格后非空，后续会联动图片数量）
-        val isButtonEnabled = newText.trim().isNotEmpty()
+        // 核心联动业务计算：按钮亮灭判定（文本除去空格后非空，或已有图片）
+        val isButtonEnabled = newText.trim().isNotEmpty() || _state.value.selectedImages.isNotEmpty()
 
         // 增量演进：克隆老状态，赋上新值，弹射出全新状态
         _state.value = _state.value.copy(
@@ -105,5 +106,20 @@ class PublishViewModel : ViewModel() {
         Log.d(TAG, "📺 [ViewModel] 状态增量演算完成 [ClickPublish] -> 进入 Loading 发布中状态")
 
         // TODO: Day 7 引入协程正式通知 data 层进行物理网络请求或数据库写入
+    }
+
+    /**
+     * 处理插入话题标签意图（MVI 大脑演算新文本）
+     * 当前实现：在文本末尾追加话题（Day 6 可升级为光标位置插入）
+     */
+    private fun handleInsertTopic(topicText: String) {
+        val currentText = _state.value.text
+        val newText = currentText + topicText
+
+        _state.value = _state.value.copy(
+            text = newText,
+            isPublishButtonEnabled = true
+        )
+        Log.d(TAG, "📺 [ViewModel] 状态增量演算完成 [InsertTopic] -> 插入话题: $topicText")
     }
 }

@@ -13,6 +13,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent">
 
+        <!-- 顶部标题栏 -->
         <androidx.constraintlayout.widget.ConstraintLayout
             android:id="@+id/mai"
             android:layout_width="match_parent"
@@ -53,6 +54,7 @@
                 app:layout_constraintTop_toTopOf="parent" />
         </androidx.constraintlayout.widget.ConstraintLayout>
 
+        <!-- 内容滚动区域 -->
         <ScrollView
             android:id="@+id/kta"
             android:layout_width="match_parent"
@@ -78,24 +80,69 @@
                     android:hint="@string/wtt_hint_input"
                     android:inputType="textMultiLine" />
 
-                <FrameLayout
+                <!-- 九宫格图片容器 -->
+                <androidx.recyclerview.widget.RecyclerView
                     android:id="@+id/grid_image_container"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:paddingHorizontal="@dimen/wtt_spacing_standard" />
+                    android:paddingHorizontal="@dimen/wtt_spacing_standard"
+                    android:overScrollMode="never" />
 
             </LinearLayout>
         </ScrollView>
 
-        <FrameLayout
+        <!-- 底部工具栏 -->
+        <LinearLayout
             android:id="@+id/bottom_toolbar_container"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="50dp"
+            android:orientation="horizontal"
+            android:background="#FAFAFA"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="@dimen/wtt_spacing_standard"
             app:layout_constraintBottom_toBottomOf="parent">
-        </FrameLayout>
+
+            <TextView
+                android:id="@+id/bar_topic"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="# 话题"
+                android:textColor="#2A62FF"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/bar_mention"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="@ 提及"
+                android:textColor="#555555" />
+
+            <TextView
+                android:id="@+id/bar_emoji"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="☺ 表情"
+                android:textColor="#555555" />
+
+            <TextView
+                android:id="@+id/bar_photo"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="📷 照片"
+                android:textColor="#555555" />
+        </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 
+    <!-- Loading 遮罩 -->
     <ProgressBar
         android:id="@+id/progressBarOverlay"
         android:layout_width="wrap_content"
