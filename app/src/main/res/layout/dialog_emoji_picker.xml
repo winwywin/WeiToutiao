@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 表情选择 BottomSheet 布局：标题 + TabLayout 分类 + ViewPager2 网格 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="320dp"
+    android:orientation="vertical"
+    android:background="@android:color/white"
+    android:paddingTop="8dp">
+
+    <!-- 标题栏 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="表情"
+        android:textColor="#333333"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:paddingBottom="6dp" />
+
+    <!-- 分类 Tab -->
+    <com.google.android.material.tabs.TabLayout
+        android:id="@+id/tab_emoji_categories"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="8dp"
+        app:tabMode="scrollable"
+        app:tabGravity="fill"
+        app:tabIndicatorColor="#2A62FF"
+        app:tabSelectedTextColor="#2A62FF"
+        app:tabTextColor="#888888"
+        app:tabRippleColor="@android:color/transparent" />
+
+    <!-- 表情网格 ViewPager -->
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/vp_emoji_pages"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="8dp"
+        android:layout_marginBottom="8dp" />
+
+</LinearLayout>

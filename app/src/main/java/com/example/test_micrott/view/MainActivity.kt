@@ -301,7 +301,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.barEmoji.setOnClickListener {
-            Log.d(tag, "📝 [View] 表情按钮被点击（待实现）")
+            EmojiPickerDialog { emoji -> insertEmojiAtCursor(emoji) }
+                .show(supportFragmentManager, "EmojiPicker")
         }
     }
 
@@ -508,6 +509,29 @@ class MainActivity : AppCompatActivity() {
 
         viewModel.sendIntent(PublishIntent.InsertMention(mentionText))
         Log.d(tag, "📝 [View] 插入 @提及: $mentionText")
+    }
+
+    // ========================================================================
+    // ☺ 表情
+    // ========================================================================
+
+    /**
+     * 将 emoji 字符插入 EditText 当前光标位置。
+     * 不设 Span（emoji 是普通字符）。
+     */
+    private fun insertEmojiAtCursor(emoji: String) {
+        val editable = binding.ktg.text ?: return
+        var start = binding.ktg.selectionStart
+        var end = binding.ktg.selectionEnd
+
+        if (start < 0) {
+            start = editable.length
+            end = editable.length
+        }
+
+        editable.replace(start, end, emoji)
+        binding.ktg.setSelection(start + emoji.length)
+        Log.d(tag, "😊 [View] 插入表情: $emoji")
     }
 
     // ========================================================================
