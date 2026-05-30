@@ -1,20 +1,36 @@
 package com.example.test_micrott.view
 
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.example.test_micrott.R
+import com.example.test_micrott.util.ImageCompressor
+import com.example.test_micrott.util.ThumbnailCache
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Collections
 
 /**
  * MVI 主项目九宫格适配器
  * 职责：纯渲染，不持有业务状态，数据由 PublishState.selectedImages 驱动
- * Day 7 升级：支持拖拽排序 + ViewHolder 类型暴露（供 ItemTouchHelper 过滤加号）
+ *
+ * Day 8 升级：
+ *   - 异步下采样缩略图：主线程 setImageURI → IO 协程 decodeSampledBitmap
+ *   - ThumbnailCache：LruCache 避免重复解码
+ *   - DiffUtil：增量刷新替代 notifyDataSetChanged
+ *   - ViewHolder 回收：取消旧加载任务 + 清理 Drawable
  */
-class ImageGridAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+class ImageGridAdapter(
+    private val scope: CoroutineScope,
+) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
         const val TYPE_IMAGE = 0
@@ -27,20 +43,28 @@ class ImageGridAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     private var mAddListener: (() -> Unit)? = null
     private var mDeleteListener: ((Int) -> Unit)? = null
     private var mOnMoveListener: ((Int, Int) -> Unit)? = null
+    private var mOnImageClickListener: ((Int) -> Unit)? = null
 
     fun setListeners(
         onAddClickListener: () -> Unit,
         onDeleteClickListener: (Int) -> Unit,
         onMoveListener: (Int, Int) -> Unit,
+        onImageClickListener: (Int) -> Unit = {},
     ) {
         this.mAddListener = onAddClickListener
         this.mDeleteListener = onDeleteClickListener
         this.mOnMoveListener = onMoveListener
+        this.mOnImageClickListener = onImageClickListener
     }
 
     fun updateData(images: List<Uri>) {
-        mSelectedImages = ArrayList(images)
-        notifyDataSetChanged()
+        val oldList = mSelectedImages
+        val newList = ArrayList(images)
+        val diffResult = DiffUtil.calculateDiff(DiffCallback(oldList, newList))
+        mSelectedImages = newList
+        diffResult.dispatchUpdatesTo(this)
+        // 新图片列表到来，旧缓存失效
+        ThumbnailCache.evictAll()
     }
 
     fun getImages(): List<Uri> = mSelectedImages
@@ -103,14 +127,90 @@ class ImageGridAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         if (holder is AddViewHolder) {
             holder.itemView.setOnClickListener { mAddListener?.invoke() }
         } else if (holder is ImageViewHolder) {
-            holder.imageView.setImageURI(mSelectedImages[position])
-            holder.btnDelete.setOnClickListener { mDeleteListener?.invoke(position) }
+            bindImageHolder(holder, position)
         }
     }
 
+    /**
+     * Day 8 异步缩略图加载流程：
+     *   1. 取消该 ViewHolder 的旧加载任务（防止快速滚动错图）
+     *   2. 检查 ThumbnailCache → 命中直接 setImageBitmap
+     *   3. 未命中 → 设灰色占位 → launch coroutine {
+     *        IO: ImageCompressor.decodeSampledBitmap()
+     *        → ThumbnailCache.put()
+     *        → 校验 absoluteAdapterPosition == position
+     *        → Main: setImageBitmap
+     *      }
+     */
+    private fun bindImageHolder(holder: ImageViewHolder, position: Int) {
+        // 取消旧任务：ViewHolder 复用后旧 job 还在跑，直接取消避免错图
+        holder.loadJob?.cancel()
+
+        val uri = mSelectedImages[position]
+        val cacheKey = uri.toString()
+
+        // 先查缓存
+        val cached = ThumbnailCache.get(cacheKey)
+        if (cached != null) {
+            holder.imageView.setImageBitmap(cached)
+        } else {
+            // 设灰色占位
+            holder.imageView.setImageDrawable(ColorDrawable(0xFFE8E8E8.toInt()))
+
+            holder.loadJob = scope.launch {
+                val bitmap = withContext(Dispatchers.IO) {
+                    ImageCompressor.decodeSampledBitmap(
+                        holder.itemView.context, uri
+                    )
+                }
+                if (bitmap != null) {
+                    ThumbnailCache.put(cacheKey, bitmap)
+                    // 校验：异步完成时检查 ViewHolder 是否仍对应同一位置
+                    if (holder.adapterPosition == position) {
+                        holder.imageView.setImageBitmap(bitmap)
+                    }
+                }
+            }
+        }
+
+        holder.btnDelete.setOnClickListener { mDeleteListener?.invoke(position) }
+        holder.imageView.setOnClickListener { mOnImageClickListener?.invoke(position) }
+    }
+
+    override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
+        super.onViewRecycled(holder)
+        if (holder is ImageViewHolder) {
+            // 回收时取消旧任务 + 清理 Drawable，防止 LeakCanary 报警
+            holder.loadJob?.cancel()
+            holder.imageView.setImageDrawable(null)
+        }
+    }
+
+    // ========================================================================
+    // DiffUtil
+    // ========================================================================
+
+    private class DiffCallback(
+        private val oldList: List<Uri>,
+        private val newList: List<Uri>,
+    ) : DiffUtil.Callback() {
+        override fun getOldListSize(): Int = oldList.size
+        override fun getNewListSize(): Int = newList.size
+        override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
+            oldList[oldItemPosition] == newList[newItemPosition]
+        override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean =
+            true // Uri 内容不变，差异由增删位置体现
+    }
+
+    // ========================================================================
+    // ViewHolder
+    // ========================================================================
+
     class AddViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView)
+
     class ImageViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val imageView: ImageView = itemView.findViewById(R.id.iv_thumnail)
         val btnDelete: View = itemView.findViewById(R.id.view_delete_fork)
+        var loadJob: Job? = null
     }
 }

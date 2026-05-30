@@ -20,6 +20,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.toColorInt
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.test_micrott.R
@@ -112,7 +113,7 @@ class MvcTestActivity : AppCompatActivity() {
 
         // day3：配置工业级 3 列网格，并把今天新加的适配器实例化
         rvImages.layoutManager = GridLayoutManager(this, 3)
-        imageGridAdapter = ImageGridAdapter()
+        imageGridAdapter = ImageGridAdapter(lifecycleScope)
 
         // day3：焊死接口回调，负责处理九宫格里的“点击加号”和“点击叉叉”
         imageGridAdapter.setListeners(

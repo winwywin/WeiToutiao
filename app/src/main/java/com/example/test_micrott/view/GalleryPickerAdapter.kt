@@ -1,22 +1,22 @@
 package com.example.test_micrott.view
 
-import android.graphics.BitmapFactory
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
-import android.util.Log
-import android.util.Size
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.test_micrott.R
-import java.io.FileNotFoundException
+import com.example.test_micrott.util.ImageCompressor
+import com.example.test_micrott.util.ThumbnailCache
 
 /**
- * 自定义相册网格适配器
+ * 自定义相册网格适配器。
  *
- * 每项显示缩略图 + 选中遮罩 + 勾选标记。
- * 使用 BitmapFactory 下采样加载缩略图，避免 setImageURI 解码全分辨率导致 ANR。
+ * Day 8 重构：删除内联 loadThumbnail/calculateSampleSize（~50 行），
+ * 改为复用 ImageCompressor.decodeSampledBitmap + ThumbnailCache，
+ * 缩略图加载改为异步（后台线程 + post 回 UI）。
  */
 class GalleryPickerAdapter(
     private val onToggle: (Int) -> Unit,
@@ -43,8 +43,8 @@ class GalleryPickerAdapter(
     override fun onBindViewHolder(holder: PhotoViewHolder, position: Int) {
         val photo = items[position]
 
-        // 异步加载缩略图（下采样，避免主线程解码全分辨率 → ANR）
-        loadThumbnail(holder.imageView, photo.uri, holder.itemView.context)
+        // Day 8: 异步加载缩略图，复用 ImageCompressor + ThumbnailCache
+        loadThumbnailAsync(holder, photo)
 
         // 选中状态
         val isSelected = photo.isSelected
@@ -57,61 +57,42 @@ class GalleryPickerAdapter(
     }
 
     /**
-     * 用 BitmapFactory 下采样加载缩略图。
+     * Day 8: 异步缩略图加载。
      *
-     * 为什么不用 setImageURI()：
-     *   setImageURI 会在主线程解码全分辨率 JPEG，数百张照片一起解码
-     *   会阻塞 UI 线程 5 秒以上，触发 ANR。
+     * 流程：
+     *   1. 查 ThumbnailCache → 命中直接 setImageBitmap
+     *   2. 未命中 → 设灰色占位 → 后台线程调用 ImageCompressor.decodeSampledBitmap
+     *      → 写入 ThumbnailCache → post 回 UI 线程 setImageBitmap
+     *
+     * 使用 Thread + post 而非协程，因为 GalleryPickerActivity 生命周期短且独立。
      */
-    private fun loadThumbnail(imageView: ImageView, uri: Uri, context: android.content.Context) {
-        // 先读尺寸，计算采样率
-        val options = BitmapFactory.Options().apply {
-            inJustDecodeBounds = true
-        }
-        try {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, options)
-            }
-        } catch (e: FileNotFoundException) {
-            Log.w("GalleryPicker", "缩略图加载失败 (文件不存在): $uri")
-            return
-        } catch (e: SecurityException) {
-            Log.w("GalleryPicker", "缩略图加载失败 (权限): $uri")
+    private fun loadThumbnailAsync(holder: PhotoViewHolder, photo: GalleryPhoto) {
+        val cacheKey = photo.uri.toString()
+
+        // 先查缓存
+        val cached = ThumbnailCache.get(cacheKey)
+        if (cached != null) {
+            holder.imageView.setImageBitmap(cached)
             return
         }
 
-        // 目标缩略图边长约 256px
-        val targetSize = 256
-        val sampleSize = calculateSampleSize(
-            options.outWidth, options.outHeight, targetSize
-        )
-        val decodeOptions = BitmapFactory.Options().apply {
-            inSampleSize = sampleSize
-        }
+        // 设灰色占位
+        holder.imageView.setImageDrawable(ColorDrawable(0xFFE0E0E0.toInt()))
 
-        try {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                val bitmap = BitmapFactory.decodeStream(stream, null, decodeOptions)
-                imageView.setImageBitmap(bitmap)
+        Thread {
+            val bitmap = ImageCompressor.decodeSampledBitmap(
+                holder.itemView.context, photo.uri, 256, 256
+            )
+            if (bitmap != null) {
+                ThumbnailCache.put(cacheKey, bitmap)
             }
-        } catch (e: FileNotFoundException) {
-            Log.w("GalleryPicker", "缩略图加载失败: $uri")
-        } catch (e: SecurityException) {
-            Log.w("GalleryPicker", "缩略图加载失败 (权限): $uri")
-        }
-    }
-
-    /**
-     * 计算 BitmapFactory 下采样率。
-     * 保证采样后长边 ≤ targetSize。
-     */
-    private fun calculateSampleSize(width: Int, height: Int, targetSize: Int): Int {
-        var sampleSize = 1
-        val maxDimension = maxOf(width, height)
-        while (maxDimension / sampleSize > targetSize) {
-            sampleSize *= 2
-        }
-        return sampleSize
+            holder.itemView.post {
+                // 校验：避免快速滚动导致图片错位
+                if (holder.adapterPosition != RecyclerView.NO_POSITION) {
+                    holder.imageView.setImageBitmap(bitmap)
+                }
+            }
+        }.start()
     }
 
     class PhotoViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Day 9: 大图预览全屏页面 -->
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- ViewPager2 大图滑动浏览 -->
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/vp_preview"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- 顶部关闭按钮 -->
+    <TextView
+        android:id="@+id/btn_close_preview"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="start|top"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="40dp"
+        android:gravity="center"
+        android:text="✕"
+        android:textColor="#FFFFFF"
+        android:textSize="22sp"
+        android:background="@drawable/bg_circle_dark"
+        android:alpha="0.8" />
+
+    <!-- 页码指示器：当前 / 总数 -->
+    <TextView
+        android:id="@+id/tv_page_indicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal|bottom"
+        android:layout_marginBottom="32dp"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="4dp"
+        android:text="1/9"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:background="#80000000" />
+
+</FrameLayout>

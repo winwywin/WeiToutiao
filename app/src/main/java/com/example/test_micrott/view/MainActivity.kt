@@ -5,6 +5,7 @@ package com.example.test_micrott.view
 // ==========================================
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.net.Uri
@@ -117,7 +118,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun initRecyclerView() {
         binding.gridImageContainer.layoutManager = GridLayoutManager(this, 3)
-        imageGridAdapter = ImageGridAdapter()
+        imageGridAdapter = ImageGridAdapter(lifecycleScope)
         imageGridAdapter.setListeners(
             onAddClickListener = {
                 tryPickPhotos()
@@ -127,6 +128,9 @@ class MainActivity : AppCompatActivity() {
             },
             onMoveListener = { from, to ->
                 viewModel.sendIntent(PublishIntent.MoveImage(from, to))
+            },
+            onImageClickListener = { position ->
+                launchImagePreview(position)
             }
         )
         binding.gridImageContainer.adapter = imageGridAdapter
@@ -277,6 +281,25 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Day 9: 从九宫格点击图片 → 启动全屏预览
+     */
+    private fun launchImagePreview(position: Int) {
+        val uris = imageGridAdapter.getImages()
+        if (uris.isEmpty()) return
+        val safePos = position.coerceIn(0, uris.size - 1)
+
+        val uriStrings = ArrayList<String>(uris.size)
+        uris.forEach { uriStrings.add(it.toString()) }
+
+        val intent = Intent(this, ImagePreviewActivity::class.java).apply {
+            putStringArrayListExtra(ImagePreviewActivity.EXTRA_URI_LIST, uriStrings)
+            putExtra(ImagePreviewActivity.EXTRA_POSITION, safePos)
+        }
+        startActivity(intent)
+        Log.d(tag, "🔍 [View] 启动大图预览: 位置=$safePos, 总数=${uris.size}")
     }
 
     // ========================================================================
@@ -630,12 +653,13 @@ class MainActivity : AppCompatActivity() {
         binding.barColor.setOnClickListener { showColorPicker() }
 
         // 触摸 EditText 时更新按钮状态（光标位置变化）
-        binding.ktg.setOnTouchListener { _, event ->
+        binding.ktg.setOnTouchListener { view, event ->
             if (event.action == MotionEvent.ACTION_UP) {
                 updateFormattingButtonStates(
                     binding.ktg.selectionStart,
                     binding.ktg.selectionEnd
                 )
+                view.performClick()
             }
             false
         }
@@ -717,8 +741,8 @@ class MainActivity : AppCompatActivity() {
      */
     private fun toggleBold() {
         val editable = binding.ktg.text ?: return
-        var selStart = binding.ktg.selectionStart
-        var selEnd = binding.ktg.selectionEnd
+        val selStart = binding.ktg.selectionStart
+        val selEnd = binding.ktg.selectionEnd
 
         if (selStart < 0 || selStart == selEnd) return // 需要选区
 
@@ -726,7 +750,7 @@ class MainActivity : AppCompatActivity() {
             .filter { it.style == Typeface.BOLD }
 
         if (existingBoldSpans.isNotEmpty()) {
-            // 移除模式：处理每个重迭的粗体 Span
+            // 移除模式：处理每个重叠的粗体 Span
             existingBoldSpans.forEach { span ->
                 removeSpanFromSelection(editable, span, selStart, selEnd) {
                     StyleSpan(Typeface.BOLD)
@@ -749,8 +773,8 @@ class MainActivity : AppCompatActivity() {
      */
     private fun toggleItalic() {
         val editable = binding.ktg.text ?: return
-        var selStart = binding.ktg.selectionStart
-        var selEnd = binding.ktg.selectionEnd
+        val selStart = binding.ktg.selectionStart
+        val selEnd = binding.ktg.selectionEnd
 
         if (selStart < 0 || selStart == selEnd) return
 
@@ -778,7 +802,7 @@ class MainActivity : AppCompatActivity() {
      * 弹出颜色选择器，锚定到 A 按钮。
      */
     private fun showColorPicker() {
-        val editable = binding.ktg.text ?: return
+        if (binding.ktg.text == null) return
         val selStart = binding.ktg.selectionStart
         val selEnd = binding.ktg.selectionEnd
         if (selStart < 0 || selStart == selEnd) return // 需要选区
@@ -818,11 +842,11 @@ class MainActivity : AppCompatActivity() {
     /**
      * 通用 Span 选区移除/拆分工具。
      *
-     * 处理 span 与选区 [selStart, selEnd) 的重迭：
+     * 处理 span 与选区 [selStart, selEnd) 的重叠：
      * - 完全在选区内 → 移除
      * - 选区在 span 内部 → 拆分为左右两段
-     * - 左重迭 → 收缩 span 右端
-     * - 右重迭 → 收缩 span 左端
+     * - 左重叠 → 收缩 span 右端
+     * - 右重叠 → 收缩 span 左端
      */
     private fun removeSpanFromSelection(
         editable: android.text.Editable,
