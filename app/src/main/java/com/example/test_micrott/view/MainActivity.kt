@@ -15,6 +15,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.widget.Toast
 import androidx.activity.viewModels
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.toColorInt
 import androidx.core.widget.doAfterTextChanged
@@ -260,7 +261,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.barMention.setOnClickListener {
-            Log.d(tag, "📝 [View] 提及按钮被点击（待实现）")
+            showMentionPicker()
         }
 
         binding.barEmoji.setOnClickListener {
@@ -328,7 +329,7 @@ class MainActivity : AppCompatActivity() {
         // ================================================================
         if (binding.ktg.text.toString() != state.text) {
             binding.ktg.setText(state.text)
-            reapplyTopicSpans()
+            reapplyProtectedSpans()
             binding.ktg.setSelection(state.text.length)
         }
 
@@ -378,7 +379,10 @@ class MainActivity : AppCompatActivity() {
         viewModel.sendIntent(PublishIntent.InsertTopic(topicText))
     }
 
-    private fun reapplyTopicSpans() {
+    /**
+     * Day 13 升级：旋转恢复时重新着色所有保护性 Span（话题 #...# + 提及 @xxx）。
+     */
+    private fun reapplyProtectedSpans() {
         val editable = binding.ktg.text ?: return
         val text = editable.toString()
         if (text.isBlank()) return
@@ -386,18 +390,88 @@ class MainActivity : AppCompatActivity() {
         val oldSpans = editable.getSpans(0, editable.length, ForegroundColorSpan::class.java)
         oldSpans.forEach { editable.removeSpan(it) }
 
-        val pattern = Regex("#[^#]*#")
-        pattern.findAll(text).forEach { match ->
+        val blue = "#2A62FF".toColorInt()
+
+        // 话题 #xxx#
+        val topicPattern = Regex("#[^#]*#")
+        topicPattern.findAll(text).forEach { match ->
             editable.setSpan(
-                ForegroundColorSpan("#2A62FF".toColorInt()),
+                ForegroundColorSpan(blue),
                 match.range.first,
                 match.range.last + 1,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
             )
         }
-        if (pattern.containsMatchIn(text)) {
-            Log.d(tag, "🎨 [View] 旋转恢复：话题 Span 已重新着色")
+
+        // 提及 @xxx（以空格/标点/结尾为边界）
+        val mentionPattern = Regex("@[^\\s@#]+")
+        mentionPattern.findAll(text).forEach { match ->
+            editable.setSpan(
+                ForegroundColorSpan(blue),
+                match.range.first,
+                match.range.last + 1,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
         }
+
+        if (topicPattern.containsMatchIn(text) || mentionPattern.containsMatchIn(text)) {
+            Log.d(tag, "🎨 [View] 旋转恢复：保护性 Span 已重新着色")
+        }
+    }
+
+    // ========================================================================
+    // @提及
+    // ========================================================================
+
+    /**
+     * 弹出用户选择弹窗。
+     * 使用 AlertDialog 展示模拟用户列表，点击用户名后插入 @提及。
+     */
+    private fun showMentionPicker() {
+        val userNames = arrayOf(
+            "张三", "李四", "王五", "赵六", "孙七",
+            "周杰伦", "刘德华", "张学友", "郭富城", "黎明",
+            "范冰冰", "李冰冰", "杨幂", "赵丽颖", "刘亦菲",
+        )
+
+        AlertDialog.Builder(this)
+            .setTitle("@ 提及用户")
+            .setItems(userNames) { _, which ->
+                val userName = userNames[which]
+                insertMentionIntoEditor(userName)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /**
+     * 将 @用户名 以蓝色 Span 插入 EditText 光标位置。
+     * 仅 @用户名 部分设 Span（不含尾部空格），与 reapplyProtectedSpans 的 regex 保持一致。
+     */
+    private fun insertMentionIntoEditor(userName: String) {
+        val editable = binding.ktg.text ?: return
+        var start = binding.ktg.selectionStart
+        var end = binding.ktg.selectionEnd
+
+        if (start < 0) {
+            start = editable.length
+            end = editable.length
+        }
+
+        val mentionText = "@$userName "
+        val spannableStringBuilder = SpannableStringBuilder(mentionText)
+        // 只对 @用户名 部分设 Span（不含尾部空格）
+        spannableStringBuilder.setSpan(
+            ForegroundColorSpan("#2A62FF".toColorInt()),
+            0, mentionText.length - 1,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+
+        editable.replace(start, end, spannableStringBuilder)
+        binding.ktg.setSelection(start + mentionText.length)
+
+        viewModel.sendIntent(PublishIntent.InsertMention(mentionText))
+        Log.d(tag, "📝 [View] 插入 @提及: $mentionText")
     }
 
     // ========================================================================

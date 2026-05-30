@@ -26,4 +26,7 @@ sealed class PublishIntent {
 
     // 6. 用户拖拽九宫格图片调整顺序
     data class MoveImage(val from: Int, val to: Int) : PublishIntent()
+
+    // 7. 用户点击底部工具栏"@"提及按钮，选中用户后插入 @用户名
+    data class InsertMention(val mentionText: String) : PublishIntent()
 }

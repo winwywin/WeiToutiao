@@ -97,6 +97,7 @@ class PublishViewModel(
             is PublishIntent.ClickPublish -> handleClickPublish()
             is PublishIntent.InsertTopic -> handleInsertTopic(intent.topicText)
             is PublishIntent.MoveImage -> handleMoveImage(intent.from, intent.to)
+            is PublishIntent.InsertMention -> handleInsertMention(intent.mentionText)
         }
     }
 
@@ -229,6 +230,22 @@ class PublishViewModel(
             persistState(newState)
         }
         Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [InsertTopic] -> 话题: $topicText（文本由TextChanged同步）")
+    }
+
+    /**
+     * 处理插入 @提及 意图
+     *
+     * 与 InsertTopic 同理：View 层直接修改 EditText 文本，
+     * doAfterTextChanged 会触发 TextChanged 同步完整文本，
+     * 此处仅确保发布按钮亮起。
+     */
+    private fun handleInsertMention(mentionText: String) {
+        if (!_state.value.isPublishButtonEnabled) {
+            val newState = _state.value.copy(isPublishButtonEnabled = true)
+            _state.value = newState
+            persistState(newState)
+        }
+        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [InsertMention] -> @$mentionText（文本由TextChanged同步）")
     }
 
     /**
