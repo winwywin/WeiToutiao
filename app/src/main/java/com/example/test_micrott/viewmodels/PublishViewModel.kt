@@ -128,13 +128,33 @@ class PublishViewModel(
 
     /**
      * 处理照片选择器带回图片的意图
+     *
+     * Day 11 升级：去重过滤 — 已存在的 URI 不再重复添加。
+     * Android Photo Picker (ACTION_PICK_IMAGES) 不支持跨会话标记已选图片，
+     * 这是系统 API 限制，因此客户端必须自行去重。
      */
     private fun handleImagesPicked(uris: List<Uri>) {
         val currentImages = _state.value.selectedImages.toMutableList()
-        currentImages.addAll(uris)
+
+        // Day 11：去重 — 过滤掉已在列表中的 URI
+        val existingSet = currentImages.toSet()
+        val newUris = uris.filter { it !in existingSet }
+        val duplicateCount = uris.size - newUris.size
+
+        if (duplicateCount > 0) {
+            Log.w(tag, "⚠️ [ViewModel] 检测到 $duplicateCount 张重复图片，已自动过滤")
+        }
+
+        currentImages.addAll(newUris)
 
         // 微信/头条硬约束：最多支持 9 张图
-        val safetyImages = if (currentImages.size > 9) currentImages.subList(0, 9) else currentImages
+        val truncated = currentImages.size - 9
+        val safetyImages = if (currentImages.size > 9) {
+            Log.w(tag, "⚠️ [ViewModel] 超出 9 张上限，已截断最后 $truncated 张")
+            currentImages.subList(0, 9)
+        } else {
+            currentImages
+        }
 
         val newState = _state.value.copy(
             selectedImages = safetyImages,
@@ -142,7 +162,7 @@ class PublishViewModel(
         _state.value = newState
         persistState(newState)
 
-        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [ImagesPicked] -> 当前图片数: ${safetyImages.size}")
+        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [ImagesPicked] -> 新增 ${newUris.size} 张，当前共 ${safetyImages.size} 张")
     }
 
     /**

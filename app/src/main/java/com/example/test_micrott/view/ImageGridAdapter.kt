@@ -65,6 +65,19 @@ class ImageGridAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         mOnMoveListener?.invoke(fromPosition, toPosition)
     }
 
+    /**
+     * 单次移动（松手吸附用）：removeAt + add，一条 notify + 一次回调
+     */
+    fun moveSingleItem(from: Int, to: Int) {
+        if ((from !in mSelectedImages.indices) || (to !in mSelectedImages.indices)) return
+        if (from == to) return
+
+        val moved = mSelectedImages.removeAt(from)
+        mSelectedImages.add(to, moved)
+        notifyItemMoved(from, to)
+        mOnMoveListener?.invoke(from, to)
+    }
+
     override fun getItemCount(): Int {
         return if (mSelectedImages.size < maxImageCount) mSelectedImages.size + 1 else maxImageCount
     }

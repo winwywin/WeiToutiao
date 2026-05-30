@@ -3,7 +3,7 @@ package com.example.test_micrott.view
 // ==========================================
 // 1. Android 系统与 Jetpack 官方核心依赖库导入区
 // ==========================================
-import android.graphics.Color
+
 import android.net.Uri
 import android.os.Bundle
 import android.text.SpannableStringBuilder
@@ -100,9 +100,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Day 7 新增：ItemTouchHelper 实现长按拖拽排序
-     * 仅允许图片格子被拖拽，加号格子不可拖拽
+     * Day 11 重构：松手吸附式拖拽排序
+     *
+     * 旧行为（Day 7）：拖动过程中经过某个位置时立即交换 — 用户体验差。
+     * 新行为：长按提起 → 自由拖动（不交换）→ 松手后自动吸附到最近网格位置。
+     *
+     * 实现：onMove 始终返回 false，禁止实时交换；clearView 时用
+     *       findChildViewUnder 找到距离松手位置最近的格子，做单次移动。
      */
+    private var dragStartPosition = RecyclerView.NO_POSITION
+
     private fun initDragSupport() {
         val callback = object : ItemTouchHelper.SimpleCallback(
             ItemTouchHelper.UP or ItemTouchHelper.DOWN or
@@ -114,15 +121,12 @@ class MainActivity : AppCompatActivity() {
                 viewHolder: RecyclerView.ViewHolder,
                 target: RecyclerView.ViewHolder
             ): Boolean {
-                // 加号格子不可参与拖拽
+                // 加号格子 / 任何格子：拖动过程中均不换位
                 if (viewHolder is ImageGridAdapter.AddViewHolder ||
                     target is ImageGridAdapter.AddViewHolder) {
                     return false
                 }
-                val from = viewHolder.adapterPosition
-                val to = target.adapterPosition
-                imageGridAdapter.onItemMove(from, to)
-                return true
+                return false
             }
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
@@ -130,6 +134,52 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun isLongPressDragEnabled(): Boolean = true
+
+            override fun onSelectedChanged(
+                viewHolder: RecyclerView.ViewHolder?,
+                actionState: Int
+            ) {
+                super.onSelectedChanged(viewHolder, actionState)
+                if (actionState == ItemTouchHelper.ACTION_STATE_DRAG) {
+                    dragStartPosition = viewHolder?.adapterPosition
+                        ?: RecyclerView.NO_POSITION
+                }
+            }
+
+            override fun clearView(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder
+            ) {
+                super.clearView(recyclerView, viewHolder)
+
+                val from = dragStartPosition
+                dragStartPosition = RecyclerView.NO_POSITION
+                if (from == RecyclerView.NO_POSITION) return
+
+                // 计算拖拽项松手时的中心点（包含拖拽位移 translationX/Y）
+                val itemView = viewHolder.itemView
+                val centerX = itemView.left + itemView.translationX +
+                        itemView.width / 2f
+                val centerY = itemView.top + itemView.translationY +
+                        itemView.height / 2f
+
+                // 找到中心点下方的格子
+                val targetView = recyclerView.findChildViewUnder(centerX, centerY)
+                if (targetView == null) return
+
+                var targetPos = recyclerView.getChildAdapterPosition(targetView)
+                if (targetPos == RecyclerView.NO_POSITION) return
+
+                // 过滤加号位置：不允许吸附到加号
+                val imageCount = imageGridAdapter.getImages().size
+                if (targetPos >= imageCount) {
+                    targetPos = imageCount - 1
+                }
+
+                if (targetPos != from && targetPos >= 0) {
+                    imageGridAdapter.moveSingleItem(from, targetPos)
+                }
+            }
         }
         ItemTouchHelper(callback).attachToRecyclerView(binding.gridImageContainer)
     }
