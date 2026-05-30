@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="2dp">
+
+    <!-- 缩略图 -->
+    <ImageView
+        android:id="@+id/iv_photo"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:scaleType="centerCrop"
+        android:adjustViewBounds="true"
+        android:layout_gravity="center" />
+
+    <!-- 选中遮罩 -->
+    <View
+        android:id="@+id/view_selected_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:background="#332A62FF"
+        android:visibility="gone" />
+
+    <!-- 勾选标记（右下角） -->
+    <ImageView
+        android:id="@+id/iv_check"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="6dp"
+        android:src="@drawable/ic_check_circle"
+        android:visibility="gone" />
+
+</FrameLayout>

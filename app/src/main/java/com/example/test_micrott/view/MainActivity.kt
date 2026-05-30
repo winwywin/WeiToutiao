@@ -6,6 +6,7 @@ package com.example.test_micrott.view
 
 import android.net.Uri
 import android.os.Bundle
+import android.provider.MediaStore
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -45,22 +46,19 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var imageGridAdapter: ImageGridAdapter
 
-    // Day 7 升级：记录本次启动相册时的剩余名额，回调中截断
-    private var pendingImageSlots = 9
-
     // Day 8 新增：追踪上一次 loading 状态，用于检测"发布完成"瞬间显示 Toast
     private var wasLoading = false
 
     // Day 8 新增：缓存上次图片列表引用，避免每帧打字触发 notifyDataSetChanged
     private var lastImageList: List<Uri> = emptyList()
 
-    // Day 9 升级：动态上限 PhotoPicker。每次 launch(pendingImageSlots) 传入剩余名额
+    // Day 11 升级：自定义相册选择器，支持已选照片跨会话勾选标记
     private val pickMultipleMedia = registerForActivityResult(
-        PickMultipleVisualMediaDynamic()
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            Log.d(tag, "📷 [View] PhotoPicker 返回 ${uris.size} 张，当前剩余名额 $pendingImageSlots")
-            viewModel.sendIntent(PublishIntent.ImagesPicked(uris))
+        GalleryPickerContract()
+    ) { resultUris ->
+        if (resultUris != null && resultUris.isNotEmpty()) {
+            Log.d(tag, "📷 [View] 自定义相册返回 ${resultUris.size} 张")
+            viewModel.sendIntent(PublishIntent.ImagesPicked(resultUris))
         } else {
             Log.d(tag, "用户取消了相册选择")
         }
@@ -163,15 +161,29 @@ class MainActivity : AppCompatActivity() {
                 val centerY = itemView.top + itemView.translationY +
                         itemView.height / 2f
 
-                // 找到中心点下方的格子
-                val targetView = recyclerView.findChildViewUnder(centerX, centerY)
-                if (targetView == null) return
+                val imageCount = imageGridAdapter.getImages().size
+                val spanCount = 3
+                var targetPos = RecyclerView.NO_POSITION
 
-                var targetPos = recyclerView.getChildAdapterPosition(targetView)
-                if (targetPos == RecyclerView.NO_POSITION) return
+                // 先尝试找中心点正下方格子
+                val childUnder = recyclerView.findChildViewUnder(centerX, centerY)
+                if (childUnder != null) {
+                    targetPos = recyclerView.getChildAdapterPosition(childUnder)
+                }
+
+                // 拖到空白区域/无 childView → 根据坐标手动算网格位置
+                if (targetPos == RecyclerView.NO_POSITION) {
+                    val cellW = (recyclerView.width - recyclerView.paddingLeft -
+                            recyclerView.paddingRight).toFloat() / spanCount
+                    val cellH = itemView.height.toFloat()
+                    val col = ((centerX - recyclerView.paddingLeft) / cellW)
+                        .toInt().coerceIn(0, spanCount - 1)
+                    val row = ((centerY - recyclerView.paddingTop) / cellH)
+                        .toInt().coerceAtLeast(0)
+                    targetPos = (row * spanCount + col).coerceIn(0, imageCount - 1)
+                }
 
                 // 过滤加号位置：不允许吸附到加号
-                val imageCount = imageGridAdapter.getImages().size
                 if (targetPos >= imageCount) {
                     targetPos = imageCount - 1
                 }
@@ -185,18 +197,40 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Day 9 升级：启动相册前计算剩余名额，动态传给 PickMultipleVisualMediaDynamic。
-     * 系统相册 UI 会显示正确的可选上限（如已有 2 张 → 显示"最多选择 7 张"）。
+     * Day 11 升级：启动自定义相册选择器。
+     * 传入已选照片的 MediaStore._ID 列表，相册内会显示勾选标记。
      */
     private fun tryPickPhotos() {
-        val currentCount = imageGridAdapter.getImages().size
-        pendingImageSlots = 9 - currentCount
-        if (pendingImageSlots <= 0) {
+        val currentImages = imageGridAdapter.getImages()
+        val maxSlots = 9 - currentImages.size
+        if (maxSlots <= 0) {
             Log.d(tag, "📷 [View] 已达 9 张上限，阻止相册启动")
             return
         }
-        Log.d(tag, "📷 [View] 启动相册，剩余名额 $pendingImageSlots")
-        pickMultipleMedia.launch(pendingImageSlots)
+        val preSelectedIds = extractMediaIds(currentImages)
+        Log.d(tag, "📷 [View] 启动自定义相册，剩余名额 $maxSlots，已选 ${preSelectedIds.size} 张")
+        pickMultipleMedia.launch(PickConfig(maxSelectable = maxSlots, preSelectedIds = preSelectedIds))
+    }
+
+    /**
+     * 从 URI 列表中提取 MediaStore.Images.Media._ID
+     */
+    private fun extractMediaIds(uris: List<Uri>): List<Long> {
+        return uris.mapNotNull { uri ->
+            try {
+                uri.lastPathSegment?.toLong()
+            } catch (_: NumberFormatException) {
+                // uri 不是标准 MediaStore 格式时，通过 contentResolver 查询
+                val cursor = contentResolver.query(
+                    uri,
+                    arrayOf(MediaStore.Images.Media._ID),
+                    null, null, null
+                )
+                cursor?.use {
+                    if (it.moveToFirst()) it.getLong(0) else null
+                }
+            }
+        }
     }
 
     // ========================================================================
@@ -218,7 +252,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.barTopic.setOnClickListener {
-            insertTopicIntoEditor(" #请输入话题# ")
+            insertTopicIntoEditor()
         }
 
         binding.barPhoto.setOnClickListener {
@@ -320,7 +354,8 @@ class MainActivity : AppCompatActivity() {
     // 话题插入
     // ========================================================================
 
-    private fun insertTopicIntoEditor(topicText: String = " #请输入话题# ") {
+    private fun insertTopicIntoEditor() {
+        val topicText = " #请输入话题# "
         val editable = binding.ktg.text ?: return
         var start = binding.ktg.selectionStart
         var end = binding.ktg.selectionEnd
@@ -414,7 +449,7 @@ class MainActivity : AppCompatActivity() {
                     for (span in spans) {
                         val spanStart = editable.getSpanStart(span)
                         val spanEnd = editable.getSpanEnd(span)
-                        if (start == end && start > spanStart && start < spanEnd) {
+                        if (start == end && start in (spanStart+1)..<spanEnd) {
                             binding.ktg.setSelection(
                                 if (start < (spanStart + spanEnd) / 2) spanStart else spanEnd
                             )
@@ -422,8 +457,8 @@ class MainActivity : AppCompatActivity() {
                         }
                         if (start != end) {
                             var newStart = start; var newEnd = end
-                            if (start > spanStart && start < spanEnd) newStart = spanStart
-                            if (end > spanStart && end < spanEnd) newEnd = spanEnd
+                            if (start in (spanStart+1)..<spanEnd) newStart = spanStart
+                            if (end in (spanStart+1)..<spanEnd) newEnd = spanEnd
                             if (newStart != start || newEnd != end) {
                                 binding.ktg.setSelection(newStart, newEnd)
                                 break

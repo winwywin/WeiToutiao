@@ -122,7 +122,7 @@ class MvcTestActivity : AppCompatActivity() {
             },
             onDeleteClickListener = { position ->
                 // 点击小叉，从数组里移除它，并通知九宫格局部回流刷新
-                if (position >= 0 && position < selectedImageUris.size) {
+                if (position in 0..<selectedImageUris.size) {
                     selectedImageUris.removeAt(position)
                     imageGridAdapter.updateData(selectedImageUris)
                     updatePublishButtonState() // 顺便联动更新右上角按钮状态
@@ -159,7 +159,8 @@ class MvcTestActivity : AppCompatActivity() {
     /**
      * 富文本核心算法：在当前光标处无错位插入高亮变色文本（对齐 A3 核心）
      */
-    private fun insertTopicIntoEditor(topicText: String = " #请输入话题# ") {
+    private fun insertTopicIntoEditor() {
+        val topicText = " #请输入话题# "
         // 1. 获取当前输入框中的文本对象
         val editable = etEditor.text ?: return
 
@@ -260,7 +261,7 @@ class MvcTestActivity : AppCompatActivity() {
                         val spanEnd = editable.getSpanEnd(span)
 
                         // 1. 如果是纯光标闪烁（start == end）且陷在了话题肚子里
-                        if (start == end && (start > spanStart) && (start < spanEnd)) {
+                        if (start == end && (start in (spanStart+1)..<spanEnd)) {
                             if (start < (spanStart + spanEnd) / 2) {
                                 etEditor.setSelection(spanStart) // 强行吸附到左边
                             } else {
@@ -274,8 +275,8 @@ class MvcTestActivity : AppCompatActivity() {
                         if (start != end) {
                             var newStart = start
                             var newEnd = end
-                            if (start > spanStart && start < spanEnd) newStart = spanStart
-                            if (end > spanStart && end < spanEnd) newEnd = spanEnd
+                            if (start in (spanStart+1)..<spanEnd) newStart = spanStart
+                            if (end in (spanStart+1)..<spanEnd) newEnd = spanEnd
                             if ((newStart != start) || (newEnd != end)) {
                                 etEditor.setSelection(newStart, newEnd) // 强行校正选区
                                 break
