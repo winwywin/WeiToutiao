@@ -6,6 +6,7 @@ package com.example.test_micrott.view
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -13,8 +14,10 @@ import android.provider.MediaStore
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import android.util.Log
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,6 +38,8 @@ import kotlinx.coroutines.launch
 import com.example.test_micrott.databinding.ActivityMainBinding
 import com.example.test_micrott.model.PublishIntent
 import com.example.test_micrott.model.PublishState
+import com.example.test_micrott.model.SpanDescriptor
+import com.example.test_micrott.model.SpanType
 import com.example.test_micrott.viewmodels.PublishViewModel
 
 /**
@@ -56,6 +61,9 @@ class MainActivity : AppCompatActivity() {
 
     // Day 8 新增：缓存上次图片列表引用，避免每帧打字触发 notifyDataSetChanged
     private var lastImageList: List<Uri> = emptyList()
+
+    // Day 16 新增：格式化工具栏状态
+    private var isFormattingToolbarVisible = false
 
     // Day 11 升级：自定义相册选择器，支持已选照片跨会话勾选标记
     private val pickMultipleMedia = registerForActivityResult(
@@ -100,6 +108,7 @@ class MainActivity : AppCompatActivity() {
         initIntentEmitters()
         observeUiState()
         setupTopicTokenGuard()
+        initFormattingToolbar()   // Day 16: 富文本格式化工具栏
     }
 
     // ========================================================================
@@ -343,6 +352,9 @@ class MainActivity : AppCompatActivity() {
         binding.barTopic.isEnabled = !loading
         binding.barMention.isEnabled = !loading
         binding.barEmoji.isEnabled = !loading
+        binding.barBold.isEnabled = !loading      // Day 16
+        binding.barItalic.isEnabled = !loading    // Day 16
+        binding.barColor.isEnabled = !loading     // Day 16
 
         val isFull = state.selectedImages.size >= 9
         binding.barPhoto.isEnabled = !loading && !isFull
@@ -367,6 +379,7 @@ class MainActivity : AppCompatActivity() {
         if (binding.ktg.text.toString() != state.text) {
             binding.ktg.setText(state.text)
             reapplyProtectedSpans()
+            reapplyFormattingSpans(state.formatSpanDescriptors)  // Day 16: 旋转恢复格式 Span
             binding.ktg.setSelection(state.text.length)
         }
 
@@ -602,5 +615,336 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    // ========================================================================
+    // Day 16: 富文本格式化 — 粗体 / 斜体 / 文字颜色
+    // ========================================================================
+
+    /**
+     * 初始化格式化工具栏：绑定 B/I/A 按钮 + 显示/隐藏逻辑。
+     */
+    private fun initFormattingToolbar() {
+        binding.barBold.setOnClickListener { toggleBold() }
+        binding.barItalic.setOnClickListener { toggleItalic() }
+        binding.barColor.setOnClickListener { showColorPicker() }
+
+        // 触摸 EditText 时更新按钮状态（光标位置变化）
+        binding.ktg.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_UP) {
+                updateFormattingButtonStates(
+                    binding.ktg.selectionStart,
+                    binding.ktg.selectionEnd
+                )
+            }
+            false
+        }
+
+        // 有文本时显示工具栏，无文本时隐藏
+        binding.ktg.doAfterTextChanged { text ->
+            val hasText = !text.isNullOrBlank()
+            if (hasText && !isFormattingToolbarVisible) {
+                showFormattingToolbar()
+            } else if (!hasText && isFormattingToolbarVisible) {
+                hideFormattingToolbar()
+            }
+        }
+    }
+
+    private fun showFormattingToolbar() {
+        binding.formattingToolbarContainer.visibility = View.VISIBLE
+        isFormattingToolbarVisible = true
+    }
+
+    private fun hideFormattingToolbar() {
+        binding.formattingToolbarContainer.visibility = View.GONE
+        isFormattingToolbarVisible = false
+    }
+
+    /**
+     * 根据当前光标/选区位置更新 B/I/A 按钮的高亮状态。
+     */
+    private fun updateFormattingButtonStates(selStart: Int, selEnd: Int) {
+        val editable = binding.ktg.text ?: return
+
+        val checkStart = if (selStart == selEnd) selStart else selStart
+        val checkEnd = if (selStart == selEnd) {
+            (selEnd + 1).coerceAtMost(editable.length)
+        } else selEnd
+
+        if (checkStart < 0 || checkStart >= editable.length) {
+            resetFormattingButtonStates()
+            return
+        }
+
+        // 检查粗体
+        val styleSpans = editable.getSpans(checkStart, checkEnd, StyleSpan::class.java)
+        val isBold = styleSpans.any { it.style == Typeface.BOLD }
+        val isItalic = styleSpans.any { it.style == Typeface.ITALIC }
+
+        binding.barBold.setTextColor(
+            if (isBold) "#2A62FF".toColorInt() else "#555555".toColorInt()
+        )
+        binding.barItalic.setTextColor(
+            if (isItalic) "#2A62FF".toColorInt() else "#555555".toColorInt()
+        )
+
+        // 检查文字颜色（排除话题/提及蓝色）
+        val topicMentionColor = "#2A62FF".toColorInt()
+        val colorSpans = editable.getSpans(checkStart, checkEnd, ForegroundColorSpan::class.java)
+        val activeColorSpan = colorSpans.firstOrNull {
+            it.foregroundColor != topicMentionColor
+        }
+        binding.barColor.setTextColor(
+            activeColorSpan?.foregroundColor ?: "#555555".toColorInt()
+        )
+    }
+
+    private fun resetFormattingButtonStates() {
+        binding.barBold.setTextColor("#555555".toColorInt())
+        binding.barItalic.setTextColor("#555555".toColorInt())
+        binding.barColor.setTextColor("#555555".toColorInt())
+    }
+
+    /**
+     * 切换选中文本的粗体格式。
+     *
+     * 处理四种情况：
+     * 1. 选区完全在粗体 Span 内 → 拆分移除
+     * 2. 选区无粗体 → 添加 StyleSpan(Typeface.BOLD)
+     * 3. 选区部分覆盖粗体 → 拆分
+     * 4. 无选区 → 不操作
+     */
+    private fun toggleBold() {
+        val editable = binding.ktg.text ?: return
+        var selStart = binding.ktg.selectionStart
+        var selEnd = binding.ktg.selectionEnd
+
+        if (selStart < 0 || selStart == selEnd) return // 需要选区
+
+        val existingBoldSpans = editable.getSpans(selStart, selEnd, StyleSpan::class.java)
+            .filter { it.style == Typeface.BOLD }
+
+        if (existingBoldSpans.isNotEmpty()) {
+            // 移除模式：处理每个重迭的粗体 Span
+            existingBoldSpans.forEach { span ->
+                removeSpanFromSelection(editable, span, selStart, selEnd) {
+                    StyleSpan(Typeface.BOLD)
+                }
+            }
+        } else {
+            // 添加模式
+            editable.setSpan(
+                StyleSpan(Typeface.BOLD), selStart, selEnd,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+
+        updateFormattingButtonStates(selStart, selEnd)
+        saveCurrentFormattingState()
+    }
+
+    /**
+     * 切换选中文本的斜体格式。逻辑与 toggleBold() 一致。
+     */
+    private fun toggleItalic() {
+        val editable = binding.ktg.text ?: return
+        var selStart = binding.ktg.selectionStart
+        var selEnd = binding.ktg.selectionEnd
+
+        if (selStart < 0 || selStart == selEnd) return
+
+        val existingItalicSpans = editable.getSpans(selStart, selEnd, StyleSpan::class.java)
+            .filter { it.style == Typeface.ITALIC }
+
+        if (existingItalicSpans.isNotEmpty()) {
+            existingItalicSpans.forEach { span ->
+                removeSpanFromSelection(editable, span, selStart, selEnd) {
+                    StyleSpan(Typeface.ITALIC)
+                }
+            }
+        } else {
+            editable.setSpan(
+                StyleSpan(Typeface.ITALIC), selStart, selEnd,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+
+        updateFormattingButtonStates(selStart, selEnd)
+        saveCurrentFormattingState()
+    }
+
+    /**
+     * 弹出颜色选择器，锚定到 A 按钮。
+     */
+    private fun showColorPicker() {
+        val editable = binding.ktg.text ?: return
+        val selStart = binding.ktg.selectionStart
+        val selEnd = binding.ktg.selectionEnd
+        if (selStart < 0 || selStart == selEnd) return // 需要选区
+
+        ColorPickerPopup(this) { color ->
+            applyTextColor(color, selStart, selEnd)
+        }.show(binding.barColor)
+    }
+
+    /**
+     * 对选区应用文字颜色（ForegroundColorSpan）。
+     * 先清除选区内已有的非话题/提及颜色 Span。
+     */
+    private fun applyTextColor(color: Int, selStart: Int, selEnd: Int) {
+        val editable = binding.ktg.text ?: return
+        val topicMentionColor = "#2A62FF".toColorInt()
+
+        // 清除选区内已有的颜色 Span（保留话题/提及的）
+        val colorSpans = editable.getSpans(selStart, selEnd, ForegroundColorSpan::class.java)
+        colorSpans.filter { it.foregroundColor != topicMentionColor }.forEach { span ->
+            removeSpanFromSelection(editable, span, selStart, selEnd) {
+                ForegroundColorSpan(span.foregroundColor)
+            }
+        }
+
+        // 应用新颜色
+        editable.setSpan(
+            ForegroundColorSpan(color), selStart, selEnd,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+
+        binding.barColor.setTextColor(color)
+        saveCurrentFormattingState()
+        Log.d(tag, "🎨 [View] 应用文字颜色: #${Integer.toHexString(color)}")
+    }
+
+    /**
+     * 通用 Span 选区移除/拆分工具。
+     *
+     * 处理 span 与选区 [selStart, selEnd) 的重迭：
+     * - 完全在选区内 → 移除
+     * - 选区在 span 内部 → 拆分为左右两段
+     * - 左重迭 → 收缩 span 右端
+     * - 右重迭 → 收缩 span 左端
+     */
+    private fun removeSpanFromSelection(
+        editable: android.text.Editable,
+        span: Any,
+        selStart: Int,
+        selEnd: Int,
+        spanFactory: () -> Any
+    ) {
+        val s = editable.getSpanStart(span)
+        val e = editable.getSpanEnd(span)
+
+        when {
+            s >= selStart && e <= selEnd -> {
+                // span 完全在选区内 → 移除
+                editable.removeSpan(span)
+            }
+            s < selStart && e > selEnd -> {
+                // 选区在 span 内部 → 拆分为两段
+                editable.removeSpan(span)
+                editable.setSpan(spanFactory(), s, selStart, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                editable.setSpan(spanFactory(), selEnd, e, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            s >= selStart -> {
+                // span 左端在选区内，右端在选区外 → 收缩左端
+                editable.removeSpan(span)
+                editable.setSpan(spanFactory(), selEnd, e, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            else -> {
+                // span 右端在选区内，左端在选区外 → 收缩右端
+                editable.removeSpan(span)
+                editable.setSpan(spanFactory(), s, selStart, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+    }
+
+    /**
+     * 提取当前 EditText 中所有格式化 Span，序列化后发往 ViewModel 持久化。
+     */
+    private fun saveCurrentFormattingState() {
+        val editable = binding.ktg.text ?: return
+        val descriptors = extractFormattingSpans(editable)
+        viewModel.sendIntent(PublishIntent.SaveFormattingSpans(descriptors))
+    }
+
+    /**
+     * 从 Editable 中提取所有格式化 Span（粗体/斜体/颜色）。
+     * 排除话题/提及的保护性 ForegroundColorSpan (#2A62FF)。
+     */
+    private fun extractFormattingSpans(editable: android.text.Editable): List<SpanDescriptor> {
+        val descriptors = mutableListOf<SpanDescriptor>()
+        val topicMentionColor = "#2A62FF".toColorInt()
+
+        // StyleSpan (BOLD / ITALIC)
+        editable.getSpans(0, editable.length, StyleSpan::class.java).forEach { span ->
+            val start = editable.getSpanStart(span)
+            val end = editable.getSpanEnd(span)
+            when (span.style) {
+                Typeface.BOLD -> descriptors.add(SpanDescriptor(start, end, SpanType.BOLD))
+                Typeface.ITALIC -> descriptors.add(SpanDescriptor(start, end, SpanType.ITALIC))
+                Typeface.BOLD_ITALIC -> {
+                    descriptors.add(SpanDescriptor(start, end, SpanType.BOLD))
+                    descriptors.add(SpanDescriptor(start, end, SpanType.ITALIC))
+                }
+            }
+        }
+
+        // ForegroundColorSpan（非话题/提及颜色）
+        editable.getSpans(0, editable.length, ForegroundColorSpan::class.java)
+            .filter { it.foregroundColor != topicMentionColor }
+            .forEach { span ->
+                descriptors.add(SpanDescriptor(
+                    editable.getSpanStart(span),
+                    editable.getSpanEnd(span),
+                    SpanType.COLOR,
+                    span.foregroundColor
+                ))
+            }
+
+        return descriptors
+    }
+
+    /**
+     * 从 SpanDescriptor 列表恢复格式化 Span 到 EditText。
+     * 在 reapplyProtectedSpans() 之后调用，确保格式颜色覆盖话题/提及蓝色。
+     */
+    private fun reapplyFormattingSpans(descriptors: List<SpanDescriptor>) {
+        val editable = binding.ktg.text ?: return
+        if (descriptors.isEmpty()) return
+
+        val topicMentionColor = "#2A62FF".toColorInt()
+        val textLen = editable.length
+
+        // 先清除旧的格式化 Span（保留话题/提及的）
+        val oldStyleSpans = editable.getSpans(0, textLen, StyleSpan::class.java)
+        oldStyleSpans.forEach { editable.removeSpan(it) }
+
+        val oldColorSpans = editable.getSpans(0, textLen, ForegroundColorSpan::class.java)
+        oldColorSpans.filter { it.foregroundColor != topicMentionColor }
+            .forEach { editable.removeSpan(it) }
+
+        // 从 descriptors 重新应用
+        descriptors.forEach { desc ->
+            val safeStart = desc.start.coerceIn(0, textLen)
+            val safeEnd = desc.end.coerceIn(0, textLen)
+            if (safeStart >= safeEnd) return@forEach
+
+            when (desc.type) {
+                SpanType.BOLD -> editable.setSpan(
+                    StyleSpan(Typeface.BOLD), safeStart, safeEnd,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+                SpanType.ITALIC -> editable.setSpan(
+                    StyleSpan(Typeface.ITALIC), safeStart, safeEnd,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+                SpanType.COLOR -> editable.setSpan(
+                    ForegroundColorSpan(desc.value), safeStart, safeEnd,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
+        }
+
+        Log.d(tag, "🎨 [View] 格式化 Span 已恢复: ${descriptors.size} 个")
     }
 }

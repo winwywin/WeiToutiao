@@ -2,4 +2,21 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- 预设文字颜色（颜色选择器） -->
+    <color name="format_color_red">#FF0000</color>
+    <color name="format_color_orange">#FF6600</color>
+    <color name="format_color_gold">#FFCC00</color>
+    <color name="format_color_green">#33CC33</color>
+    <color name="format_color_blue">#0066FF</color>
+    <color name="format_color_purple">#9933FF</color>
+    <color name="format_color_pink">#FF3399</color>
+    <color name="format_color_gray">#666666</color>
+    <color name="format_color_dark">#333333</color>
+    <color name="format_color_black">#000000</color>
+
+    <!-- 格式化工具栏 -->
+    <color name="format_toolbar_active">#2A62FF</color>
+    <color name="format_toolbar_inactive">#555555</color>
+    <color name="format_toolbar_bg">#F5F5F5</color>
 </resources>

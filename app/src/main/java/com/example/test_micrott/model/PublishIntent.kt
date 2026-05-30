@@ -29,4 +29,7 @@ sealed class PublishIntent {
 
     // 7. 用户点击底部工具栏"@"提及按钮，选中用户后插入 @用户名
     data class InsertMention(val mentionText: String) : PublishIntent()
+
+    // 8. View 层通知 ViewModel 保存当前格式化 Span 描述符（用于旋转恢复）
+    data class SaveFormattingSpans(val descriptors: List<SpanDescriptor>) : PublishIntent()
 }

@@ -12,4 +12,5 @@ data class PublishState(
     val selectedImages: List<Uri> = emptyList(),
     val isLoading: Boolean = false,
     val isPublishButtonEnabled: Boolean = false,
+    val formatSpanDescriptors: List<SpanDescriptor> = emptyList(),
 )

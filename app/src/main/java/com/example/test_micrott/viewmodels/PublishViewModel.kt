@@ -6,6 +6,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import com.example.test_micrott.model.PublishIntent
 import com.example.test_micrott.model.PublishState
+import com.example.test_micrott.model.SpanDescriptor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,6 +32,7 @@ class PublishViewModel(
         private const val KEY_IMAGES = "publish_images"
         private const val KEY_LOADING = "publish_loading"
         private const val KEY_BUTTON_ENABLED = "publish_button_enabled"
+        private const val KEY_FORMAT_SPANS = "publish_format_spans"
     }
 
     // 🛡️ 防护隔离防线：对内私有可变，严禁外部直接 `.value = ...` 篡改账本
@@ -55,6 +57,9 @@ class PublishViewModel(
         val savedImages = savedStateHandle.get<ArrayList<Uri>>(KEY_IMAGES) ?: emptyList()
         val savedLoading = savedStateHandle.get<Boolean>(KEY_LOADING) ?: false
         val savedButtonEnabled = savedStateHandle.get<Boolean>(KEY_BUTTON_ENABLED) ?: false
+        val savedFormatSpans = SpanDescriptor.deserializeList(
+            savedStateHandle.get<ArrayList<String>>(KEY_FORMAT_SPANS)
+        )
 
         if (savedText.isNotEmpty() || savedImages.isNotEmpty()) {
             Log.d(tag, "🔄 [ViewModel] SavedStateHandle 恢复 -> text=${savedText.length}字, images=${savedImages.size}张")
@@ -65,6 +70,7 @@ class PublishViewModel(
             selectedImages = savedImages,
             isLoading = savedLoading,
             isPublishButtonEnabled = savedButtonEnabled,
+            formatSpanDescriptors = savedFormatSpans,
         )
     }
 
@@ -77,6 +83,7 @@ class PublishViewModel(
         savedStateHandle[KEY_IMAGES] = ArrayList(state.selectedImages)
         savedStateHandle[KEY_LOADING] = state.isLoading
         savedStateHandle[KEY_BUTTON_ENABLED] = state.isPublishButtonEnabled
+        savedStateHandle[KEY_FORMAT_SPANS] = SpanDescriptor.serializeList(state.formatSpanDescriptors)
     }
 
     // ========================================================================
@@ -98,6 +105,7 @@ class PublishViewModel(
             is PublishIntent.InsertTopic -> handleInsertTopic(intent.topicText)
             is PublishIntent.MoveImage -> handleMoveImage(intent.from, intent.to)
             is PublishIntent.InsertMention -> handleInsertMention(intent.mentionText)
+            is PublishIntent.SaveFormattingSpans -> handleSaveFormatting(intent.descriptors)
         }
     }
 
@@ -208,7 +216,7 @@ class PublishViewModel(
             delay(2000) // 模拟网络请求
 
             // 发布完成：清空表单，退出 loading
-            val resetState = PublishState() // text="", images=empty, loading=false, btnEnabled=false
+            val resetState = PublishState() // 所有字段默认值: text="", images=empty, loading=false, btnEnabled=false, formatSpans=empty
             _state.value = resetState
             persistState(resetState)
 
@@ -246,6 +254,19 @@ class PublishViewModel(
             persistState(newState)
         }
         Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [InsertMention] -> @$mentionText（文本由TextChanged同步）")
+    }
+
+    /**
+     * 处理保存格式化 Span 描述符意图
+     *
+     * 格式化操作是纯 View 层行为，此处仅接收 Span 描述符并持久化到 SavedStateHandle，
+     * 确保旋转屏幕后格式化状态不丢失。
+     */
+    private fun handleSaveFormatting(descriptors: List<SpanDescriptor>) {
+        val newState = _state.value.copy(formatSpanDescriptors = descriptors)
+        _state.value = newState
+        persistState(newState)
+        Log.d(tag, "🎨 [ViewModel] 格式化 Span 已保存: ${descriptors.size} 个")
     }
 
     /**

@@ -61,7 +61,7 @@
             android:id="@+id/kta"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            app:layout_constraintBottom_toTopOf="@id/bottom_toolbar_container"
+            app:layout_constraintBottom_toTopOf="@id/formatting_toolbar_container"
             app:layout_constraintTop_toBottomOf="@id/mai">
 
             <LinearLayout
@@ -92,6 +92,54 @@
 
             </LinearLayout>
         </ScrollView>
+
+        <!-- 格式化工具栏（第二行，B/I/A） -->
+        <LinearLayout
+            android:id="@+id/formatting_toolbar_container"
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:orientation="horizontal"
+            android:background="#F5F5F5"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="@dimen/wtt_spacing_standard"
+            android:visibility="gone"
+            app:layout_constraintBottom_toTopOf="@id/bottom_toolbar_container">
+
+            <TextView
+                android:id="@+id/bar_bold"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="B"
+                android:textStyle="bold"
+                android:textSize="16sp"
+                android:textColor="#555555"
+                android:background="?attr/selectableItemBackground" />
+
+            <TextView
+                android:id="@+id/bar_italic"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="I"
+                android:textStyle="italic"
+                android:textSize="16sp"
+                android:textColor="#555555"
+                android:background="?attr/selectableItemBackground" />
+
+            <TextView
+                android:id="@+id/bar_color"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="A"
+                android:textSize="16sp"
+                android:textColor="#555555"
+                android:background="?attr/selectableItemBackground" />
+        </LinearLayout>
 
         <!-- 底部工具栏 -->
         <LinearLayout
