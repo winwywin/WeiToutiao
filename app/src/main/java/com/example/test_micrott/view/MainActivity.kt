@@ -4,7 +4,10 @@ package com.example.test_micrott.view
 // 1. Android 系统与 Jetpack 官方核心依赖库导入区
 // ==========================================
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.text.SpannableStringBuilder
@@ -14,6 +17,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -64,6 +68,27 @@ class MainActivity : AppCompatActivity() {
             Log.d(tag, "用户取消了相册选择")
         }
     }
+
+    // Day 14：运行时权限请求（读照片权限）
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            Log.d(tag, "📷 [View] 照片权限已授予，启动自定义相册")
+            launchGalleryPicker()
+        } else {
+            Log.d(tag, "📷 [View] 用户拒绝照片权限")
+            Toast.makeText(this, "需要照片权限才能选择图片", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 根据 API 级别返回正确的照片读权限 */
+    private val photoPermission: String
+        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -199,9 +224,20 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Day 11 升级：启动自定义相册选择器。
+     * Day 14 追加：先检查运行时权限。
      * 传入已选照片的 MediaStore._ID 列表，相册内会显示勾选标记。
      */
     private fun tryPickPhotos() {
+        if (checkSelfPermission(photoPermission) == PackageManager.PERMISSION_GRANTED) {
+            launchGalleryPicker()
+        } else {
+            Log.d(tag, "📷 [View] 照片权限未授予，请求中...")
+            requestPermissionLauncher.launch(photoPermission)
+        }
+    }
+
+    /** 权限已授予后，真正启动 GalleryPickerActivity */
+    private fun launchGalleryPicker() {
         val currentImages = imageGridAdapter.getImages()
         val maxSlots = 9 - currentImages.size
         if (maxSlots <= 0) {
