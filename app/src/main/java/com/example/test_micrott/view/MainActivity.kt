@@ -13,6 +13,7 @@ import android.view.KeyEvent
 import android.view.View
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
@@ -29,7 +30,8 @@ import com.example.test_micrott.viewmodels.PublishViewModel
 
 /**
  * 【提线木偶层 - MainActivity】
- * Day 5 核心任务：将 MVC 沙盒中调通的 PhotoPicker + 话题插入 + 九宫格逻辑迁移至 MVI
+ * Day 5：MVC 沙盒 PhotoPicker + 话题插入 + 九宫格逻辑迁移至 MVI
+ * Day 6：SavedStateHandle 旋转屏恢复 + 话题 Span 自动重新着色
  */
 class MainActivity : AppCompatActivity() {
 
@@ -144,9 +146,10 @@ class MainActivity : AppCompatActivity() {
         // 2. 刷新 Loading 遮罩
         binding.progressBarOverlay.visibility = if (state.isLoading) View.VISIBLE else View.GONE
 
-        // 3. 刷新输入框文本（防光标回弹）
+        // 3. 刷新输入框文本（防光标回弹）+ Day 6：旋转后话题 Span 重新着色
         if (binding.ktg.text.toString() != state.text) {
             binding.ktg.setText(state.text)
+            reapplyTopicSpans()          // 扫描 #...# 重新着色
             binding.ktg.setSelection(state.text.length)
         }
 
@@ -186,6 +189,37 @@ class MainActivity : AppCompatActivity() {
 
         // 同步通知 ViewModel 文本已变更
         viewModel.sendIntent(PublishIntent.InsertTopic(topicText))
+    }
+
+    /**
+     * Day 6 新增：旋转屏 / 进程重建后，扫描文本中的 #...# 模式重新着色
+     *
+     * 原理：EditText 在旋转后会自动恢复 plain text，但自定义 Spannable
+     * （ForegroundColorSpan）不会随系统 Bundle 保留，需要手动重建。
+     * 此方法利用正则匹配所有 #...# 话题标签，重新施加蓝色高亮。
+     */
+    private fun reapplyTopicSpans() {
+        val editable = binding.ktg.text ?: return
+        val text = editable.toString()
+        if (text.isBlank()) return
+
+        // 清除旧的话题 Span（防止叠加）
+        val oldSpans = editable.getSpans(0, editable.length, ForegroundColorSpan::class.java)
+        oldSpans.forEach { editable.removeSpan(it) }
+
+        // 重新扫描 #...# 模式
+        val pattern = Regex("#[^#]*#")
+        pattern.findAll(text).forEach { match ->
+            editable.setSpan(
+                ForegroundColorSpan(Color.parseColor("#2A62FF")),
+                match.range.first,
+                match.range.last + 1,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+        if (pattern.containsMatchIn(text)) {
+            Log.d(tag, "🎨 [View] 旋转恢复：话题 Span 已重新着色")
+        }
     }
 
     /**
