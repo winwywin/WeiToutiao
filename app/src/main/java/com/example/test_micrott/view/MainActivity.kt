@@ -11,6 +11,7 @@ import android.text.style.ForegroundColorSpan
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import android.widget.Toast
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -46,6 +47,12 @@ class MainActivity : AppCompatActivity() {
 
     // Day 7 升级：记录本次启动相册时的剩余名额，回调中截断
     private var pendingImageSlots = 9
+
+    // Day 8 新增：追踪上一次 loading 状态，用于检测"发布完成"瞬间显示 Toast
+    private var wasLoading = false
+
+    // Day 8 新增：缓存上次图片列表引用，避免每帧打字触发 notifyDataSetChanged
+    private var lastImageList: List<android.net.Uri> = emptyList()
 
     // PhotoPicker 注册（max 9 由系统护栏兜底，实际由 pendingImageSlots 截断）
     private val pickMultipleMedia = registerForActivityResult(
@@ -183,34 +190,74 @@ class MainActivity : AppCompatActivity() {
     // 渲染引擎
     // ========================================================================
 
+    /**
+     * Day 8 重构：render() 性能优化 + loading 守卫
+     *
+     * 修复两个关键 bug：
+     * 1. 打字卡顿：跳过不必要的 updateData（用 === 引用比较），去除冗余操作
+     * 2. Loading 永不消失：loading 状态下禁用所有交互控件
+     */
     private fun render(state: PublishState) {
-        Log.d(tag, "📺 [View] 收到新 State 账本，开始执行全量机械化渲染: $state")
+        Log.d(tag, "📺 [View] 收到新 State 账本，开始渲染: isLoading=${state.isLoading}, textLen=${state.text.length}, images=${state.selectedImages.size}")
 
-        // 1. 发布按钮
-        binding.btnPublish.isEnabled = state.isPublishButtonEnabled
+        val loading = state.isLoading
+
+        // ================================================================
+        // 1. Loading 遮罩
+        // ================================================================
+        binding.progressBarOverlay.visibility = if (loading) View.VISIBLE else View.GONE
+
+        // ================================================================
+        // 2. Loading 守卫：禁用所有可交互控件，防止发布中继续编辑
+        // ================================================================
+        binding.ktg.isEnabled = !loading
+        binding.btnPublish.isEnabled = state.isPublishButtonEnabled && !loading
+        binding.barTopic.isEnabled = !loading
+        binding.barMention.isEnabled = !loading
+        binding.barEmoji.isEnabled = !loading
+
+        val isFull = state.selectedImages.size >= 9
+        binding.barPhoto.isEnabled = !loading && !isFull
+
+        // ================================================================
+        // 3. 发布按钮颜色
+        // ================================================================
         binding.btnPublish.setBackgroundColor(
-            if (state.isPublishButtonEnabled) Color.parseColor("#F85149")
+            if (state.isPublishButtonEnabled && !loading) Color.parseColor("#F85149")
             else Color.parseColor("#A8A8A8")
         )
 
-        // 2. Loading 遮罩
-        binding.progressBarOverlay.visibility = if (state.isLoading) View.VISIBLE else View.GONE
+        // ================================================================
+        // 4. 底部照片按钮 alpha（满 9 张或 loading 时变灰）
+        // ================================================================
+        binding.barPhoto.alpha = if (isFull || loading) 0.35f else 1.0f
 
-        // 3. 输入框文本 + Span 恢复
+        // ================================================================
+        // 5. 输入框文本：仅在外部变更（SavedState 恢复 / 发布重置）时回写
+        //    正常打字时 EditText.text == state.text，此分支不触发，避免光标跳动
+        // ================================================================
         if (binding.ktg.text.toString() != state.text) {
             binding.ktg.setText(state.text)
             reapplyTopicSpans()
             binding.ktg.setSelection(state.text.length)
         }
 
-        // 4. 九宫格 — Day 7 修复：空状态始终可见（显示加号按钮）
-        binding.gridImageContainer.visibility = View.VISIBLE
-        imageGridAdapter.updateData(state.selectedImages)
+        // ================================================================
+        // 6. 九宫格：仅图片列表引用变化时才 updateData，避免每帧打字触发
+        //    notifyDataSetChanged（PublishState.copy 对未改字段保持原引用）
+        // ================================================================
+        if (state.selectedImages !== lastImageList) {
+            imageGridAdapter.updateData(state.selectedImages)
+            lastImageList = state.selectedImages
+        }
 
-        // 5. 底部照片按钮 — Day 7 新增：满 9 张禁用
-        val isFull = state.selectedImages.size >= 9
-        binding.barPhoto.isEnabled = !isFull
-        binding.barPhoto.alpha = if (isFull) 0.35f else 1.0f
+        // ================================================================
+        // 7. 发布完成检测：loading 从 true→false + 表单已清空 → 弹 Toast
+        // ================================================================
+        if (wasLoading && !loading && state.text.isEmpty() && state.selectedImages.isEmpty()) {
+            Toast.makeText(this, "发布成功", Toast.LENGTH_SHORT).show()
+        }
+        wasLoading = loading
     }
 
     // ========================================================================

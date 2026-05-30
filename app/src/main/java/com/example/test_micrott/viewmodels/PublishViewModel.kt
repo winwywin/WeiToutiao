@@ -6,9 +6,12 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import com.example.test_micrott.model.PublishIntent
 import com.example.test_micrott.model.PublishState
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import androidx.lifecycle.viewModelScope
 
 /**
  * 核心调度大脑 - PublishViewModel (MVI-MVVM 融合架构核心)
@@ -102,7 +105,11 @@ class PublishViewModel(
     // ========================================================================
 
     /**
-     * 处理用户打字意图（高低频清洗与逻辑演算）
+     * 处理用户打字意图
+     *
+     * Day 8 优化：【修复打字卡顿】TextChanged 不再调用 persistState。
+     * 每键写入 SavedStateHandle（Bundle 序列化）是高频打字的性能杀手。
+     * 文本持久化依赖 Activity.onSaveInstanceState 即可覆盖旋转/进程死亡场景。
      */
     private fun handleTextChanged(newText: String) {
         if (_state.value.text == newText) return
@@ -114,7 +121,7 @@ class PublishViewModel(
             isPublishButtonEnabled = isButtonEnabled
         )
         _state.value = newState
-        persistState(newState)
+        // ⚠️ 不再 persistState — 见上方注释
 
         Log.d(TAG, "📺 [ViewModel] 状态增量演算完成 [TextChanged] -> 吐出新State")
     }
@@ -161,17 +168,40 @@ class PublishViewModel(
 
     /**
      * 处理点击发布按钮意图
+     *
+     * Day 8 修复：【loading 永不消失 + 发布中仍可编辑】
+     * 1. isLoading guard 防止重复点击
+     * 2. 禁用发布按钮
+     * 3. 协程模拟网络请求，完成后：
+     *    - 重置所有状态（清空文本、图片）
+     *    - isLoading = false
+     *    - 发布按钮恢复禁用状态（空内容）
      */
     private fun handleClickPublish() {
+        if (_state.value.isLoading) {
+            Log.d(TAG, "⛔ [ViewModel] 发布中，忽略重复点击")
+            return
+        }
+
         val newState = _state.value.copy(
-            isLoading = true
+            isLoading = true,
+            isPublishButtonEnabled = false
         )
         _state.value = newState
         persistState(newState)
 
         Log.d(TAG, "📺 [ViewModel] 状态增量演算完成 [ClickPublish] -> 进入 Loading 发布中状态")
 
-        // TODO: Day 7 引入协程正式通知 data 层进行物理网络请求或数据库写入
+        viewModelScope.launch {
+            delay(2000) // 模拟网络请求
+
+            // 发布完成：清空表单，退出 loading
+            val resetState = PublishState() // text="", images=empty, loading=false, btnEnabled=false
+            _state.value = resetState
+            persistState(resetState)
+
+            Log.d(TAG, "✅ [ViewModel] 发布完成，表单已重置")
+        }
     }
 
     /**
