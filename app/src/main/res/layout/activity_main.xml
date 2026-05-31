@@ -192,12 +192,44 @@
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 
-    <!-- Loading 遮罩 -->
-    <ProgressBar
+    <!-- Loading 遮罩（Day 17 升级：水平进度条 + 步骤文字） -->
+    <LinearLayout
         android:id="@+id/progressBarOverlay"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:visibility="gone" />
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="#CCFFFFFF"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tv_upload_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="准备发布..."
+            android:textSize="15sp"
+            android:textColor="#333333"
+            android:layout_marginBottom="16dp" />
+
+        <ProgressBar
+            android:id="@+id/pb_upload_progress"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="240dp"
+            android:layout_height="8dp"
+            android:progress="0"
+            android:max="100"
+            android:progressTint="#F85149"
+            android:progressBackgroundTint="#E0E0E0" />
+
+        <TextView
+            android:id="@+id/tv_upload_percent"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0%"
+            android:textSize="13sp"
+            android:textColor="#888888"
+            android:layout_marginTop="8dp" />
+
+    </LinearLayout>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

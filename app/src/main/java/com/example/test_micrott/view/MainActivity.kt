@@ -363,9 +363,14 @@ class MainActivity : AppCompatActivity() {
         val loading = state.isLoading
 
         // ================================================================
-        // 1. Loading 遮罩
+        // 1. Loading 遮罩（Day 17 升级：水平进度条 + 步骤文字）
         // ================================================================
         binding.progressBarOverlay.visibility = if (loading) View.VISIBLE else View.GONE
+        if (loading) {
+            binding.tvUploadStatus.text = state.uploadStatusText.ifEmpty { "发布中..." }
+            binding.pbUploadProgress.progress = state.uploadProgress
+            binding.tvUploadPercent.text = "${state.uploadProgress}%"
+        }
 
         // ================================================================
         // 2. Loading 守卫：禁用所有可交互控件，防止发布中继续编辑

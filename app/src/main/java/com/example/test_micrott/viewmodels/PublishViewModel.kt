@@ -1,9 +1,10 @@
 package com.example.test_micrott.viewmodels
 
+import android.app.Application
 import android.net.Uri
 import android.util.Log
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
-import androidx.lifecycle.ViewModel
 import com.example.test_micrott.model.PublishIntent
 import com.example.test_micrott.model.PublishState
 import com.example.test_micrott.model.SpanDescriptor
@@ -13,6 +14,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import androidx.lifecycle.viewModelScope
+import com.example.test_micrott.util.ImageCompressor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * 核心调度大脑 - PublishViewModel (MVI-MVVM 融合架构核心)
@@ -21,10 +26,13 @@ import androidx.lifecycle.viewModelScope
  * 2. 接收来自 View 层的单向 Intent 指令，进行闭环业务演算。
  *
  * Day 6 升级：接入 SavedStateHandle，旋转屏幕 / 进程销毁后状态100%恢复。
+ * Day 17 升级：继承 AndroidViewModel（需要 Context 获取 cacheDir 压缩图片）。
+ *             handleClickPublish 改为分步发布：压缩 → 上传 → 完成。
  */
 class PublishViewModel(
+    application: Application,
     private val savedStateHandle: SavedStateHandle
-) : ViewModel() {
+) : AndroidViewModel(application) {
 
     companion object {
         // SavedStateHandle 存储键
@@ -189,13 +197,14 @@ class PublishViewModel(
     /**
      * 处理点击发布按钮意图
      *
-     * Day 8 修复：【loading 永不消失 + 发布中仍可编辑】
-     * 1. isLoading guard 防止重复点击
-     * 2. 禁用发布按钮
-     * 3. 协程模拟网络请求，完成后：
-     *    - 重置所有状态（清空文本、图片）
-     *    - isLoading = false
-     *    - 发布按钮恢复禁用状态（空内容）
+     * Day 17 重构：分步发布流程
+     *   Step 1 — 压缩：逐张图片调用 ImageCompressor.compressToFile，
+     *            进度推进 0→50%，状态文字 "正在压缩 x/n..."
+     *   Step 2 — 上传：模拟逐张上传（delay 600ms/张），
+     *            进度推进 50→100%，状态文字 "正在上传 x/n..."
+     *   Step 3 — 完成：重置 State，清理临时文件
+     *
+     * 临时压缩文件存放于 cacheDir/compress/，完成后统一清理。
      */
     private fun handleClickPublish() {
         if (_state.value.isLoading) {
@@ -203,20 +212,86 @@ class PublishViewModel(
             return
         }
 
-        val newState = _state.value.copy(
+        val images = _state.value.selectedImages
+        val totalImages = images.size
+
+        val loadingState = _state.value.copy(
             isLoading = true,
             isPublishButtonEnabled = false,
+            uploadProgress = 0,
+            uploadStatusText = if (totalImages > 0) "准备发布..." else "发布中...",
         )
-        _state.value = newState
-        persistState(newState)
+        _state.value = loadingState
+        persistState(loadingState)
 
-        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [ClickPublish] -> 进入 Loading 发布中状态")
+        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [ClickPublish] -> 进入 Loading 发布中状态，共 $totalImages 张图片")
 
         viewModelScope.launch {
-            delay(2000) // 模拟网络请求
+            // ================================================================
+            // Step 1: 图片压缩（IO 密集型，派发到 IO 线程池）
+            // ================================================================
+            val compressedFiles = mutableListOf<File>()
+            val ctx = getApplication<Application>()
+            val compressDir = File(ctx.cacheDir, "compress").also { it.mkdirs() }
 
-            // 发布完成：清空表单，退出 loading
-            val resetState = PublishState() // 所有字段默认值: text="", images=empty, loading=false, btnEnabled=false, formatSpans=empty
+            if (totalImages > 0) {
+                images.forEachIndexed { index, uri ->
+                    // 更新进度：压缩阶段占 0→50%
+                    val compressProgress = ((index.toFloat() / totalImages) * 50).toInt()
+                    val compressState = _state.value.copy(
+                        uploadProgress = compressProgress,
+                        uploadStatusText = "正在压缩 ${index + 1}/$totalImages..."
+                    )
+                    _state.value = compressState
+
+                    val compressedFile = withContext(Dispatchers.IO) {
+                        try {
+                            val bitmap = ImageCompressor.decodeSampledBitmap(
+                                ctx, uri,
+                                targetWidth = 1920, targetHeight = 1920
+                            )
+                            if (bitmap != null) {
+                                val outFile = File(compressDir, "img_${System.currentTimeMillis()}_$index.jpg")
+                                ImageCompressor.compressToFile(bitmap, outFile, quality = 85)
+                            } else null
+                        } catch (e: Exception) {
+                            Log.w(tag, "⚠️ [ViewModel] 图片压缩失败 index=$index: ${e.message}")
+                            null
+                        }
+                    }
+                    compressedFile?.let { compressedFiles.add(it) }
+                    Log.d(tag, "🗜️ [ViewModel] 压缩完成 ${index + 1}/$totalImages，文件=${compressedFile?.name}")
+                }
+            }
+
+            // ================================================================
+            // Step 2: 模拟上传（每张 600ms，占进度 50→100%）
+            // ================================================================
+            val filesToUpload = if (compressedFiles.isNotEmpty()) compressedFiles else
+                List(maxOf(totalImages, 1)) { null } // 无图片时至少跑一次模拟
+
+            filesToUpload.forEachIndexed { index, file ->
+                val uploadProgress = 50 + ((index.toFloat() / filesToUpload.size) * 50).toInt()
+                val uploadState = _state.value.copy(
+                    uploadProgress = uploadProgress,
+                    uploadStatusText = if (totalImages > 0) "正在上传 ${index + 1}/${filesToUpload.size}..."
+                                       else "发布中..."
+                )
+                _state.value = uploadState
+
+                delay(600) // 模拟单张上传耗时
+                Log.d(tag, "📤 [ViewModel] 上传完成 ${index + 1}/${filesToUpload.size}，文件=${file?.name ?: "（无图）"}")
+            }
+
+            // ================================================================
+            // Step 3: 清理临时文件 + 重置 State
+            // ================================================================
+            withContext(Dispatchers.IO) {
+                compressedFiles.forEach { it.delete() }
+                Log.d(tag, "🗑️ [ViewModel] 清理临时压缩文件 ${compressedFiles.size} 个")
+            }
+
+            val resetState = PublishState() // 所有字段默认值
             _state.value = resetState
             persistState(resetState)
 
