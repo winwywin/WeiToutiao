@@ -14,10 +14,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import androidx.lifecycle.viewModelScope
+import com.example.test_micrott.model.UploadStatus
 import com.example.test_micrott.util.ImageCompressor
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 
 /**
  * 核心调度大脑 - PublishViewModel (MVI-MVVM 融合架构核心)
@@ -199,11 +200,13 @@ class PublishViewModel(
      *
      * Day 17 重构：分步发布流程
      *   Step 1 — 压缩：逐张图片调用 ImageCompressor.compressToFile，
-     *            进度推进 0→50%，状态文字 "正在压缩 x/n..."
+     *            进度推进 0→50%，输出 UploadStatus.Compressing(current, total)
      *   Step 2 — 上传：模拟逐张上传（delay 600ms/张），
-     *            进度推进 50→100%，状态文字 "正在上传 x/n..."
+     *            进度推进 50→100%，输出 UploadStatus.Uploading(current, total)
      *   Step 3 — 完成：重置 State，清理临时文件
      *
+     * 注意：UploadStatus 不含字符串，由 View 层用 getString(R.string.xxx, args) 渲染，
+     * 满足「不在 ViewModel 里拼接 UI 字符串」的最佳实践。
      * 临时压缩文件存放于 cacheDir/compress/，完成后统一清理。
      */
     private fun handleClickPublish() {
@@ -219,7 +222,7 @@ class PublishViewModel(
             isLoading = true,
             isPublishButtonEnabled = false,
             uploadProgress = 0,
-            uploadStatusText = if (totalImages > 0) "准备发布..." else "发布中...",
+            uploadStatus = UploadStatus.Preparing,
         )
         _state.value = loadingState
         persistState(loadingState)
@@ -238,11 +241,13 @@ class PublishViewModel(
                 images.forEachIndexed { index, uri ->
                     // 更新进度：压缩阶段占 0→50%
                     val compressProgress = ((index.toFloat() / totalImages) * 50).toInt()
-                    val compressState = _state.value.copy(
+                    _state.value = _state.value.copy(
                         uploadProgress = compressProgress,
-                        uploadStatusText = "正在压缩 ${index + 1}/$totalImages..."
+                        uploadStatus = UploadStatus.Compressing(
+                            current = index + 1,
+                            total = totalImages
+                        )
                     )
-                    _state.value = compressState
 
                     val compressedFile = withContext(Dispatchers.IO) {
                         try {
@@ -272,12 +277,13 @@ class PublishViewModel(
 
             filesToUpload.forEachIndexed { index, file ->
                 val uploadProgress = 50 + ((index.toFloat() / filesToUpload.size) * 50).toInt()
-                val uploadState = _state.value.copy(
+                _state.value = _state.value.copy(
                     uploadProgress = uploadProgress,
-                    uploadStatusText = if (totalImages > 0) "正在上传 ${index + 1}/${filesToUpload.size}..."
-                                       else "发布中..."
+                    uploadStatus = if (totalImages > 0)
+                        UploadStatus.Uploading(current = index + 1, total = filesToUpload.size)
+                    else
+                        UploadStatus.Publishing
                 )
-                _state.value = uploadState
 
                 delay(600) // 模拟单张上传耗时
                 Log.d(tag, "📤 [ViewModel] 上传完成 ${index + 1}/${filesToUpload.size}，文件=${file?.name ?: "（无图）"}")

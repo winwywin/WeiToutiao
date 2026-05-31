@@ -5,6 +5,7 @@ package com.example.test_micrott.view
 // ==========================================
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Typeface
@@ -36,6 +37,7 @@ import kotlinx.coroutines.launch
 // ==========================================
 // 2. 本地项目业务组件导入
 // ==========================================
+import com.example.test_micrott.R
 import com.example.test_micrott.databinding.ActivityMainBinding
 import com.example.test_micrott.model.PublishIntent
 import com.example.test_micrott.model.PublishState
@@ -70,7 +72,7 @@ class MainActivity : AppCompatActivity() {
     private val pickMultipleMedia = registerForActivityResult(
         GalleryPickerContract()
     ) { resultUris ->
-        if (resultUris != null && resultUris.isNotEmpty()) {
+        if (!resultUris.isNullOrEmpty()) {
             Log.d(tag, "📷 [View] 自定义相册返回 ${resultUris.size} 张")
             viewModel.sendIntent(PublishIntent.ImagesPicked(resultUris))
         } else {
@@ -367,9 +369,20 @@ class MainActivity : AppCompatActivity() {
         // ================================================================
         binding.progressBarOverlay.visibility = if (loading) View.VISIBLE else View.GONE
         if (loading) {
-            binding.tvUploadStatus.text = state.uploadStatusText.ifEmpty { "发布中..." }
+            // 使用 getString() + UploadStatus 结构体渲染本地化文字，
+            // 避免直接拼接字符串（符合「Use resource strings with placeholders」要求）
+            binding.tvUploadStatus.text = when (val status = state.uploadStatus) {
+                is com.example.test_micrott.model.UploadStatus.Compressing ->
+                    getString(R.string.wtt_upload_compress, status.current, status.total)
+                is com.example.test_micrott.model.UploadStatus.Uploading ->
+                    getString(R.string.wtt_upload_send, status.current, status.total)
+                is com.example.test_micrott.model.UploadStatus.Publishing,
+                is com.example.test_micrott.model.UploadStatus.Preparing ->
+                    getString(R.string.wtt_status_publishing)
+                else -> getString(R.string.wtt_status_publishing)
+            }
             binding.pbUploadProgress.progress = state.uploadProgress
-            binding.tvUploadPercent.text = "${state.uploadProgress}%"
+            binding.tvUploadPercent.text = getString(R.string.wtt_upload_percent, state.uploadProgress)
         }
 
         // ================================================================
@@ -424,7 +437,7 @@ class MainActivity : AppCompatActivity() {
         // 7. 发布完成检测：loading 从 true→false + 表单已清空 → 弹 Toast
         // ================================================================
         if (wasLoading && !loading && state.text.isEmpty() && state.selectedImages.isEmpty()) {
-            Toast.makeText(this, "发布成功", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.wtt_publish_success, Toast.LENGTH_SHORT).show()
         }
         wasLoading = loading
     }
@@ -658,7 +671,9 @@ class MainActivity : AppCompatActivity() {
         binding.barColor.setOnClickListener { showColorPicker() }
 
         // 触摸 EditText 时更新按钮状态（光标位置变化）
-        binding.ktg.setOnTouchListener { view, event ->
+        // @SuppressLint: performClick() 已在 ACTION_UP 中显式调用，满足可访问性要求
+        @SuppressLint("ClickableViewAccessibility")
+        val touchListener = View.OnTouchListener { view, event ->
             if (event.action == MotionEvent.ACTION_UP) {
                 updateFormattingButtonStates(
                     binding.ktg.selectionStart,
@@ -668,6 +683,7 @@ class MainActivity : AppCompatActivity() {
             }
             false
         }
+        binding.ktg.setOnTouchListener(touchListener)
 
         // 有文本时显示工具栏，无文本时隐藏
         binding.ktg.doAfterTextChanged { text ->
@@ -807,7 +823,7 @@ class MainActivity : AppCompatActivity() {
      * 弹出颜色选择器，锚定到 A 按钮。
      */
     private fun showColorPicker() {
-        if (binding.ktg.text == null) return
+        if (binding.ktg.text.isNullOrEmpty()) return
         val selStart = binding.ktg.selectionStart
         val selEnd = binding.ktg.selectionEnd
         if (selStart < 0 || selStart == selEnd) return // 需要选区

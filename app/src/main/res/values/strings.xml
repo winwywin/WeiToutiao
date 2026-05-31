@@ -1,8 +1,16 @@
 <resources>
-<string name="app_name">微头条</string>
-<string name="wtt_title_publish">发头条</string>
-<string name="wtt_btn_publish">发布</string>
-<string name="wtt_hint_input">分享你的新鲜事...</string>
-<string name="wtt_status_publishing">正在发布中</string>
-<string name="wtt_btn_cancel">取消</string>
+    <string name="app_name">微头条</string>
+    <string name="wtt_title_publish">发头条</string>
+    <string name="wtt_btn_publish">发布</string>
+    <string name="wtt_hint_input">分享你的新鲜事...</string>
+    <string name="wtt_status_publishing">发布中…</string>
+    <string name="wtt_btn_cancel">取消</string>
+
+    <!-- Day 17: 图片上传进度 -->
+    <!-- %1$d = 进度百分比 (0-100) -->
+    <string name="wtt_upload_percent">%1$d%%</string>
+    <!-- %1$d = 当前序号, %2$d = 总数 -->
+    <string name="wtt_upload_compress">正在压缩 %1$d/%2$d…</string>
+    <string name="wtt_upload_send">正在上传 %1$d/%2$d…</string>
+    <string name="wtt_publish_success">发布成功</string>
 </resources>

@@ -61,7 +61,7 @@ class ImagePreviewActivity : AppCompatActivity() {
 
     private fun parseIntent() {
         val uriStrings = intent.getStringArrayListExtra(EXTRA_URI_LIST)
-        if (uriStrings != null) {
+        if (!uriStrings.isNullOrEmpty()) {
             imageUris.clear()
             uriStrings.forEach { imageUris.add(Uri.parse(it)) }
         }
