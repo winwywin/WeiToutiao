@@ -30,9 +30,17 @@ object ThumbnailCache {
     }
 
     /**
+     * 移除单个条目。
+     * updateData 时对已不存在的 URI 精准移除，
+     * 避免无条件 evictAll() 导致还在用的缩略图被清掉。
+     */
+    fun remove(key: String) {
+        cache.remove(key)
+    }
+
+    /**
      * 清空所有缓存条目。
-     * 当图片列表发生外部变更时（updateData 接收到新 URI 列表）调用，
-     * 避免旧缩略图占用缓存空间。
+     * 仅在 Activity/Fragment 销毁或内存警告时调用。
      */
     fun evictAll() {
         cache.evictAll()

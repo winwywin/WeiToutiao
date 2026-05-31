@@ -79,7 +79,7 @@ class GalleryPickerActivity : AppCompatActivity() {
         // 网格
         rvGallery = findViewById(R.id.rv_gallery)
         rvGallery.layoutManager = GridLayoutManager(this, COLUMN_COUNT)
-        adapter = GalleryPickerAdapter { position -> toggleSelection(position) }
+        adapter = GalleryPickerAdapter(scope) { position -> toggleSelection(position) }
         rvGallery.adapter = adapter
 
         // 开始加载：显示进度条

@@ -10,6 +10,11 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.test_micrott.R
 import com.example.test_micrott.util.ImageCompressor
 import com.example.test_micrott.util.ThumbnailCache
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 自定义相册网格适配器。
@@ -19,6 +24,7 @@ import com.example.test_micrott.util.ThumbnailCache
  * 缩略图加载改为异步（后台线程 + post 回 UI）。
  */
 class GalleryPickerAdapter(
+    private val scope: CoroutineScope,
     private val onToggle: (Int) -> Unit,
 ) : RecyclerView.Adapter<GalleryPickerAdapter.PhotoViewHolder>() {
 
@@ -57,48 +63,56 @@ class GalleryPickerAdapter(
     }
 
     /**
-     * Day 8: 异步缩略图加载。
+     * Day 8 重构：协程异步加载缩略图，替代 Thread{}.start()
      *
-     * 流程：
+     * 修复：滚动时每绑定一个 ViewHolder 就创建一个新线程，
+     * 500 张照片快速滚动会堆积几十个并发线程 → OOM/ANR
+     *
+     * 新流程：
      *   1. 查 ThumbnailCache → 命中直接 setImageBitmap
-     *   2. 未命中 → 设灰色占位 → 后台线程调用 ImageCompressor.decodeSampledBitmap
-     *      → 写入 ThumbnailCache → post 回 UI 线程 setImageBitmap
-     *
-     * 使用 Thread + post 而非协程，因为 GalleryPickerActivity 生命周期短且独立。
+     *   2. 未命中 → 设灰色占位 → scope.launch(IO) 解码
+     *   3. ViewHolder 回收时 cancel() → 不会错位
      */
     private fun loadThumbnailAsync(holder: PhotoViewHolder, photo: GalleryPhoto) {
-        val cacheKey = photo.uri.toString()
+        holder.loadJob?.cancel()
 
-        // 先查缓存
+        val cacheKey = photo.uri.toString()
         val cached = ThumbnailCache.get(cacheKey)
         if (cached != null) {
             holder.imageView.setImageBitmap(cached)
             return
         }
 
-        // 设灰色占位
         holder.imageView.setImageDrawable(ColorDrawable(0xFFE0E0E0.toInt()))
 
-        Thread {
-            val bitmap = ImageCompressor.decodeSampledBitmap(
-                holder.itemView.context, photo.uri, 256, 256
-            )
+        holder.loadJob = scope.launch {
+            val bitmap = withContext(Dispatchers.IO) {
+                ImageCompressor.decodeSampledBitmap(
+                    holder.itemView.context,
+                    photo.uri,
+                    256, 256
+                )
+            }
             if (bitmap != null) {
                 ThumbnailCache.put(cacheKey, bitmap)
-            }
-            holder.itemView.post {
-                // 校验：避免快速滚动导致图片错位
                 if (holder.adapterPosition != RecyclerView.NO_POSITION) {
                     holder.imageView.setImageBitmap(bitmap)
                 }
             }
-        }.start()
+        }
+    }
+
+    override fun onViewRecycled(holder: PhotoViewHolder) {
+        super.onViewRecycled(holder)
+        holder.loadJob?.cancel()
+        holder.imageView.setImageDrawable(null)
     }
 
     class PhotoViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val imageView: ImageView = itemView.findViewById(R.id.iv_photo)
         val overlay: View = itemView.findViewById(R.id.view_selected_overlay)
         val checkMark: ImageView = itemView.findViewById(R.id.iv_check)
+        var loadJob: Job? = null
     }
 }
 

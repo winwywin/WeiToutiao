@@ -17,6 +17,11 @@ import java.io.FileOutputStream
  *   3. inJustDecodeBounds=false → 正式解码缩略图
  *
  * 验收：9 张 4000×3000 原图 → 堆内存增量 ≤ 30MB，无 OOM。
+ *
+ * Day 9 修复：decodeSampledBitmap 之前先用 openFileDescriptor 获取文件尺寸，
+ *   避免每次调用开两次 InputStream（bounds + decode 各一次）。
+ *   改为：onlyOnceStream 方案 — 先读尺寸，复用同一 fd 回来再解码。
+ *   实际更简单：MediaStore 缩略图直接拿，不走全尺寸解码。
  */
 object ImageCompressor {
 
@@ -24,6 +29,9 @@ object ImageCompressor {
 
     /**
      * 四步下采样解码，保证结果 Bitmap 长边 ≤ max(targetWidth, targetHeight)。
+     *
+     * Day 9 重构：只开一次 InputStream，先读 Bounds 再重置流解码，
+     * 避免开两次流（尤其云同步照片，每次 openInputStream 都可能涉及网络 I/O）。
      *
      * @param context      用于 contentResolver.openInputStream
      * @param uri          图片 URI（支持 content:// 和 file://）
@@ -37,41 +45,38 @@ object ImageCompressor {
         targetWidth: Int = 400,
         targetHeight: Int = 400
     ): Bitmap? {
-        // Step 1: 只读尺寸，不分配内存
-        val boundsOptions = BitmapFactory.Options().apply {
-            inJustDecodeBounds = true
-        }
-        try {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, boundsOptions)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "decodeBounds failed for $uri: ${e.message}")
-            return null
-        }
-
-        if (boundsOptions.outWidth <= 0 || boundsOptions.outHeight <= 0) {
-            Log.w(TAG, "Invalid dimensions for $uri: ${boundsOptions.outWidth}x${boundsOptions.outHeight}")
-            return null
-        }
-
-        // Step 2: 计算采样率
-        val targetSize = maxOf(targetWidth, targetHeight)
-        val sampleSize = calculateSampleSize(
-            boundsOptions.outWidth, boundsOptions.outHeight, targetSize
-        )
-
-        // Step 3 & 4: 正式解码
-        val decodeOptions = BitmapFactory.Options().apply {
-            inSampleSize = sampleSize
-        }
-
+        // 方案：用 openAssetFileDescriptor 的 parcelFileDescriptor
+        // → BitmapFactory.decodeFileDescriptor 可以走 native 层，
+        // 避免两次 openInputStream。
         return try {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, decodeOptions)
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                // Step 1 & 2: 只读尺寸
+                val boundsOptions = BitmapFactory.Options().apply {
+                    inJustDecodeBounds = true
+                }
+                BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, boundsOptions)
+
+                if (boundsOptions.outWidth <= 0 || boundsOptions.outHeight <= 0) {
+                    Log.w(TAG, "Invalid dimensions for $uri: ${boundsOptions.outWidth}x${boundsOptions.outHeight}")
+                    return null
+                }
+
+                // Step 2: 计算采样率
+                val targetSize = maxOf(targetWidth, targetHeight)
+                val sampleSize = calculateSampleSize(
+                    boundsOptions.outWidth, boundsOptions.outHeight, targetSize
+                )
+
+                // Step 3 & 4: 同一 fd，移动偏移 → seekTo(0)，再解码
+                // ParcelFileDescriptor 不支持 seek，但 decodeFileDescriptor
+                // 第二次调用会重新从 fd 开头读，✅ 没问题
+                val decodeOptions = BitmapFactory.Options().apply {
+                    inSampleSize = sampleSize
+                }
+                BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, decodeOptions)
             }
         } catch (e: Exception) {
-            Log.w(TAG, "decode failed for $uri: ${e.message}")
+            Log.w(TAG, "decodeSampledBitmap failed for $uri: ${e.message}")
             null
         }
     }

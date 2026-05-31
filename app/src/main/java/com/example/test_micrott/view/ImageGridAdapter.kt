@@ -61,10 +61,19 @@ class ImageGridAdapter(
         val oldList = mSelectedImages
         val newList = ArrayList(images)
         val diffResult = DiffUtil.calculateDiff(DiffCallback(oldList, newList))
+
+        // P2 修复：只移除"不再存在"的 URI 对应的缓存条目，
+        // 避免无条件 evictAll() 导致每次增删图片都重新解码所有缩略图。
+        val newKeys = newList.map { it.toString() }.toHashSet()
+        oldList.forEach { uri ->
+            val key = uri.toString()
+            if (key !in newKeys) {
+                ThumbnailCache.remove(key)
+            }
+        }
+
         mSelectedImages = newList
         diffResult.dispatchUpdatesTo(this)
-        // 新图片列表到来，旧缓存失效
-        ThumbnailCache.evictAll()
     }
 
     fun getImages(): List<Uri> = mSelectedImages
