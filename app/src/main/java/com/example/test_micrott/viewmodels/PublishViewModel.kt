@@ -140,6 +140,9 @@ class PublishViewModel(
             is PublishIntent.RestoreDraft -> handleRestoreDraft()
             is PublishIntent.DismissDraft -> handleDismissDraft()
             is PublishIntent.ForceSave -> handleForceSave()
+            is PublishIntent.ShowTopicPicker -> handleShowTopicPicker()
+            is PublishIntent.HideTopicPicker -> handleHideTopicPicker()
+            is PublishIntent.SelectTopic -> handleSelectTopic(intent.topicName)
         }
     }
 
@@ -592,5 +595,33 @@ class PublishViewModel(
      */
     fun onActivityStop() {
         handleForceSave()
+    }
+
+    // ========================================================================
+    // Day 21+：话题选择器
+    // ========================================================================
+
+    private fun handleShowTopicPicker() {
+        // 每次打开话题选择器时 shuffle 话题列表，模拟"刷新"效果
+        val shuffled = _state.value.hotTopics.shuffled()
+        _state.value = _state.value.copy(
+            showTopicPicker = true,
+            hotTopics = shuffled,
+        )
+        Log.d(tag, "📋 [ViewModel] 话题选择器已打开: ${shuffled.size} 个话题")
+    }
+
+    private fun handleHideTopicPicker() {
+        _state.value = _state.value.copy(showTopicPicker = false)
+        Log.d(tag, "📋 [ViewModel] 话题选择器已关闭")
+    }
+
+    /**
+     * 用户选中某个话题 → 复用现有的 InsertTopic 逻辑，将完整话题标签插入文本。
+     */
+    private fun handleSelectTopic(topicName: String) {
+        val topicText = " #$topicName# "
+        handleInsertTopic(topicText)
+        Log.d(tag, "📋 [ViewModel] 用户选中话题: $topicName")
     }
 }

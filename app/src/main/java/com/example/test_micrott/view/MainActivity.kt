@@ -8,7 +8,9 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -18,9 +20,14 @@ import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.util.Log
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -32,6 +39,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import kotlinx.coroutines.launch
 
 // ==========================================
@@ -43,6 +51,7 @@ import com.example.test_micrott.model.PublishIntent
 import com.example.test_micrott.model.PublishState
 import com.example.test_micrott.model.SpanDescriptor
 import com.example.test_micrott.model.SpanType
+import com.example.test_micrott.model.TopicItem
 import com.example.test_micrott.viewmodels.PublishViewModel
 
 /**
@@ -304,7 +313,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.barTopic.setOnClickListener {
-            insertTopicIntoEditor()
+            viewModel.sendIntent(PublishIntent.ShowTopicPicker)
         }
 
         binding.barPhoto.setOnClickListener {
@@ -370,6 +379,15 @@ class MainActivity : AppCompatActivity() {
                 savedAt = state.draftSavedAt,
             ))
             return
+        }
+
+        // ================================================================
+        // 0c. 话题选择器 BottomSheet（状态驱动）
+        // ================================================================
+        if (state.showTopicPicker) {
+            showTopicBottomSheet(state.hotTopics)
+        } else {
+            dismissTopicBottomSheet()
         }
 
         val loading = state.isLoading
@@ -576,33 +594,202 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ========================================================================
-    // 话题插入
+    // Day 21+：话题 BottomSheet 选择器
     // ========================================================================
 
-    private fun insertTopicIntoEditor() {
-        val topicText = " #请输入话题# "
-        val editable = binding.ktg.text ?: return
-        var start = binding.ktg.selectionStart
-        var end = binding.ktg.selectionEnd
+    /** 当前展示的话题 BottomSheet 引用（用于 render 中关闭） */
+    private var topicBottomSheet: BottomSheetDialog? = null
 
-        if (start < 0) {
-            start = editable.length
-            end = editable.length
+    /**
+     * 展示话题选择器 BottomSheet。
+     * 包含热门话题标签（蓝色边框圆角 chip）+ 底部自定义输入框。
+     *
+     * 从 render() 中由 showTopicPicker 状态驱动调用。
+     */
+    private fun showTopicBottomSheet(topics: List<TopicItem>) {
+        if (topicBottomSheet?.isShowing == true) return // 已展示，不重复弹
+
+        val bottomSheet = BottomSheetDialog(this)
+        topicBottomSheet = bottomSheet
+
+        // 构建内容布局
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp2px(20), dp2px(16), dp2px(20), dp2px(24))
         }
 
-        val spannableStringBuilder = SpannableStringBuilder(topicText)
-        spannableStringBuilder.setSpan(
-            ForegroundColorSpan("#2A62FF".toColorInt()),
-            0, topicText.length,
-            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
+        // 标题
+        val titleView = TextView(this).apply {
+            text = "热门话题"
+            setTextColor("#1A1A1A".toColorInt())
+            textSize = 16f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, 0, 0, dp2px(12))
+        }
+        container.addView(titleView)
 
-        isProgrammaticChange = true
-        editable.replace(start, end, spannableStringBuilder)
-        isProgrammaticChange = false
-        binding.ktg.setSelection(start + topicText.length)
+        // 话题标签容器（采用 LinearLayout 嵌套实现流式布局，避免引入 FlexboxLayout 依赖）
+        val chipsRow = buildTopicChipsRow(topics, bottomSheet)
+        container.addView(chipsRow)
 
-        viewModel.sendIntent(PublishIntent.InsertTopic(topicText))
+        // 分隔线
+        val divider = View(this).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp2px(1)
+            )
+            setBackgroundColor("#E5E5E5".toColorInt())
+        }
+        container.addView(divider)
+
+        // 自定义输入区域
+        val customLabel = TextView(this).apply {
+            text = "或输入自定义话题"
+            setTextColor("#999999".toColorInt())
+            textSize = 13f
+            setPadding(0, dp2px(12), 0, dp2px(8))
+        }
+        container.addView(customLabel)
+
+        val inputRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        val inputField = EditText(this).apply {
+            hint = "输入话题名称"
+            setHintTextColor("#CCCCCC".toColorInt())
+            setTextColor("#1A1A1A".toColorInt())
+            textSize = 14f
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp2px(8).toFloat()
+                setStroke(dp2px(1), "#E5E5E5".toColorInt())
+            }
+            setPadding(dp2px(12), dp2px(10), dp2px(12), dp2px(10))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        inputRow.addView(inputField)
+
+        val confirmBtn = TextView(this).apply {
+            text = "插入"
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(dp2px(16), dp2px(10), dp2px(16), dp2px(10))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp2px(8).toFloat()
+                setColor("#2A62FF".toColorInt())
+            }
+            val btnLp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(dp2px(10), 0, 0, 0)
+            }
+            layoutParams = btnLp
+
+            setOnClickListener {
+                val customTopic = inputField.text.toString().trim()
+                if (customTopic.isNotEmpty()) {
+                    viewModel.sendIntent(PublishIntent.SelectTopic(customTopic))
+                    bottomSheet.dismiss()
+                }
+            }
+        }
+        inputRow.addView(confirmBtn)
+        container.addView(inputRow)
+
+        bottomSheet.setContentView(container)
+        bottomSheet.setOnDismissListener {
+            topicBottomSheet = null
+            viewModel.sendIntent(PublishIntent.HideTopicPicker)
+        }
+        bottomSheet.show()
+    }
+
+    /** 关闭话题 BottomSheet（render 中状态驱动） */
+    private fun dismissTopicBottomSheet() {
+        topicBottomSheet?.dismiss()
+        topicBottomSheet = null
+    }
+
+    /** dp → px 工具方法 */
+    private fun dp2px(dp: Int): Int =
+        (dp * resources.displayMetrics.density).toInt()
+
+    /**
+     * 构建话题标签流式布局（3 列）。
+     * 使用嵌套 LinearLayout 手动分行，避免引入 Flexbox 依赖。
+     */
+    private fun buildTopicChipsRow(topics: List<TopicItem>, bottomSheet: BottomSheetDialog): LinearLayout {
+        val chipHeight = dp2px(36)
+        val chipPaddingH = dp2px(14)
+        val chipPaddingV = dp2px(8)
+        val chipMargin = dp2px(8)
+        val maxRowWidth = dp2px(280) // BottomSheet 可用宽度近似
+
+        val rootLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        var currentRow: LinearLayout? = null
+        var currentRowWidth = 0
+
+        topics.forEach { topic ->
+            val chip = TextView(this).apply {
+                text = topic.displayText
+                setTextColor("#2A62FF".toColorInt())
+                textSize = 13f
+                setPadding(chipPaddingH, chipPaddingV, chipPaddingH, chipPaddingV)
+                gravity = Gravity.CENTER
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = dp2px(18).toFloat()
+                    setStroke(dp2px(1), "#2A62FF".toColorInt())
+                    setColor(Color.TRANSPARENT)
+                }
+                setOnClickListener {
+                    viewModel.sendIntent(PublishIntent.SelectTopic(topic.name))
+                    bottomSheet.dismiss()
+                }
+
+                // 估算 chip 宽度：文字宽度 + 左右内边距
+                val paint = this.paint
+                val textWidth = paint.measureText(topic.displayText).toInt()
+                val chipWidth = textWidth + chipPaddingH * 2 + chipMargin
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    chipHeight
+                )
+                tag = chipWidth // 用 tag 临时存储宽度，供分行判断
+            }
+
+            val estimatedWidth = chip.tag as Int
+            if (currentRow == null || currentRowWidth + estimatedWidth > maxRowWidth) {
+                currentRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                    setPadding(0, 0, 0, chipMargin)
+                }
+                rootLayout.addView(currentRow)
+                currentRowWidth = 0
+            }
+
+            val chipLp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                chipHeight
+            ).apply {
+                setMargins(0, 0, chipMargin, 0)
+            }
+            currentRow.addView(chip, chipLp)
+            currentRowWidth += estimatedWidth
+        }
+
+        return rootLayout
     }
 
     /**

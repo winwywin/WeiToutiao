@@ -54,4 +54,13 @@ sealed class PublishIntent {
 
     // 13. 强制触发一次保存（App 进入后台 / onPause 场景）
     object ForceSave : PublishIntent()
+
+    // 14. 用户点击底部工具栏"# 话题"按钮，弹出话题选择器
+    object ShowTopicPicker : PublishIntent()
+
+    // 15. 用户关闭话题选择器
+    object HideTopicPicker : PublishIntent()
+
+    // 16. 用户在话题选择器中点击某个话题（携带完整话题名，不含 # 包裹）
+    data class SelectTopic(val topicName: String) : PublishIntent()
 }

@@ -56,6 +56,9 @@ data class PublishState(
     val draftSavedAt: Long = 0L,
     val draftTextLength: Int = 0,
     val draftImageCount: Int = 0,
+    // Day 21+：话题选择器
+    val hotTopics: List<TopicItem> = TopicItem.DEFAULT_HOT_TOPICS,
+    val showTopicPicker: Boolean = false,
 ) {
     companion object {
         /** 微头条字数上限（与今日头条一致） */
