@@ -1,10 +1,13 @@
 package com.example.test_micrott.util
 
+import android.content.ContentResolver
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.util.Log
+import android.util.Size
 import java.io.File
 import java.io.FileOutputStream
 
@@ -45,38 +48,97 @@ object ImageCompressor {
         targetWidth: Int = 400,
         targetHeight: Int = 400
     ): Bitmap? {
-        // 方案：用 openAssetFileDescriptor 的 parcelFileDescriptor
-        // → BitmapFactory.decodeFileDescriptor 可以走 native 层，
-        // 避免两次 openInputStream。
+        val tTotal = System.currentTimeMillis()
+        val uriSegment = uri.lastPathSegment ?: "?"
+
+        // ── API 29+: 使用系统硬件加速缩略图（MediaStore 预缓存，<10ms/张） ──
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val bitmap = context.contentResolver.loadThumbnail(
+                    uri, Size(targetWidth, targetHeight), null
+                )
+                if (bitmap.width > 0 && bitmap.height > 0) {
+                    val totalMs = System.currentTimeMillis() - tTotal
+                    // 尺寸守卫：loadThumbnail 可能返回 MICRO_KIND(96x96) 等极小缩略图，
+                    // 若尺寸不足目标的一半，回退手动解码保证清晰度
+                    val minAcceptableW = targetWidth / 2
+                    val minAcceptableH = targetHeight / 2
+                    if (bitmap.width >= minAcceptableW && bitmap.height >= minAcceptableH) {
+                        val flag = if (totalMs > 50) "🐢" else "  "
+                        Log.i(TAG, "$flag [loadThumbnail] ${uriSegment} total=${totalMs}ms → ${bitmap.width}x${bitmap.height}")
+                        return bitmap
+                    }
+                    Log.w(TAG, "loadThumbnail too small (${bitmap.width}x${bitmap.height} < ${minAcceptableW}x${minAcceptableH}) for $uriSegment, fallback to manual decode")
+                    bitmap.recycle()
+                } else {
+                    // loadThumbnail 返回 null（部分 ROM/文件格式没有预生成缩略图）
+                    Log.w(TAG, "loadThumbnail returned null for $uriSegment, fallback to manual decode")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "loadThumbnail failed for $uriSegment: ${e.message}, fallback to manual decode")
+                // 部分厂商/文件格式不支持 loadThumbnail，回退到手动解码
+            }
+        }
+
+        // ── API < 29 或 loadThumbnail 失败/返回 null：手动解码 ──
         return try {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                // Step 1 & 2: 只读尺寸
+            // Step 1: 打开 fd 读取图片尺寸（只读 bounds，不分配像素）
+            val pfd1 = context.contentResolver.openFileDescriptor(uri, "r")
+            val tAfterFd = System.currentTimeMillis()
+            val fdOpenMs = tAfterFd - tTotal
+
+            if (pfd1 == null) {
+                Log.w(TAG, "❌ openFileDescriptor null: $uriSegment")
+                return null
+            }
+
+            var outWidth = 0
+            var outHeight = 0
+            pfd1.use { fd ->
                 val boundsOptions = BitmapFactory.Options().apply {
                     inJustDecodeBounds = true
                 }
-                BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, boundsOptions)
+                BitmapFactory.decodeFileDescriptor(fd.fileDescriptor, null, boundsOptions)
+                outWidth = boundsOptions.outWidth
+                outHeight = boundsOptions.outHeight
+            }
+            val tAfterBounds = System.currentTimeMillis()
+            val boundsMs = tAfterBounds - tAfterFd
 
-                if (boundsOptions.outWidth <= 0 || boundsOptions.outHeight <= 0) {
-                    Log.w(TAG, "Invalid dimensions for $uri: ${boundsOptions.outWidth}x${boundsOptions.outHeight}")
-                    return null
-                }
+            if (outWidth <= 0 || outHeight <= 0) {
+                Log.w(TAG, "invalid dimensions: ${outWidth}x${outHeight} $uriSegment")
+                return null
+            }
 
-                // Step 2: 计算采样率
-                val targetSize = maxOf(targetWidth, targetHeight)
-                val sampleSize = calculateSampleSize(
-                    boundsOptions.outWidth, boundsOptions.outHeight, targetSize
-                )
+            val targetSize = maxOf(targetWidth, targetHeight)
+            val sampleSize = calculateSampleSize(outWidth, outHeight, targetSize)
 
-                // Step 3 & 4: 同一 fd，移动偏移 → seekTo(0)，再解码
-                // ParcelFileDescriptor 不支持 seek，但 decodeFileDescriptor
-                // 第二次调用会重新从 fd 开头读，✅ 没问题
+            // Step 2: 重新打开 fd 进行实际解码（第一次 openFileDescriptor 的 fd 指针已移动）
+            val pfd2 = context.contentResolver.openFileDescriptor(uri, "r")
+            if (pfd2 == null) {
+                Log.w(TAG, "❌ reopenFileDescriptor null: $uriSegment")
+                return null
+            }
+
+            val bitmap = pfd2.use { fd ->
                 val decodeOptions = BitmapFactory.Options().apply {
                     inSampleSize = sampleSize
                 }
-                BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, decodeOptions)
+                val bmp = BitmapFactory.decodeFileDescriptor(fd.fileDescriptor, null, decodeOptions)
+                val tAfterBmp = System.currentTimeMillis()
+                val bmpMs = tAfterBmp - tAfterBounds
+                val totalMs = tAfterBmp - tTotal
+
+                val slowFlag = if (totalMs > 200 || fdOpenMs > 50 || bmpMs > 150) "🐢" else "  "
+                Log.i(TAG, "$slowFlag [manual] ${uriSegment} fd=${fdOpenMs}ms bounds=${boundsMs}ms bmp=${bmpMs}ms total=${totalMs}ms | ${outWidth}x${outHeight} s=${sampleSize}→${bmp?.width ?: 0}x${bmp?.height ?: 0}")
+                bmp
             }
+            bitmap
         } catch (e: Exception) {
-            Log.w(TAG, "decodeSampledBitmap failed for $uri: ${e.message}")
+            Log.w(TAG, "💥 decode fail $uriSegment: ${e.message} (${System.currentTimeMillis() - tTotal}ms)")
+            null
+        } catch (e: Error) {
+            Log.w(TAG, "💥 decode crash $uriSegment: ${e.message} (${System.currentTimeMillis() - tTotal}ms)")
             null
         }
     }

@@ -52,8 +52,10 @@ class GalleryPickerActivity : AppCompatActivity() {
     private val allPhotos = mutableListOf<GalleryPhoto>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val t0 = System.currentTimeMillis()
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_gallery_picker)
+        Log.d(tag, "⏱️ onCreate setContentView 耗时: ${System.currentTimeMillis() - t0}ms")
 
         maxSelectable = intent.getIntExtra(
             GalleryPickerContract.EXTRA_MAX, 9
@@ -97,17 +99,38 @@ class GalleryPickerActivity : AppCompatActivity() {
     // 加载相册
     // ========================================================================
 
+    private var onCreateTime = 0L
+
     private fun loadPhotos(preselectedSet: Set<Long>) {
+        onCreateTime = System.currentTimeMillis()
         scope.launch {
+            // ── 阶段1：MediaStore 查询 ──
+            val tQueryStart = System.currentTimeMillis()
+            Log.d(tag, "⏱️ [阶段1] 开始查询 MediaStore...")
             val photos = withContext(Dispatchers.IO) { queryAllPhotos(preselectedSet) }
+            val tQueryEnd = System.currentTimeMillis()
+            Log.d(tag, "⏱️ [阶段1] MediaStore 查询完成: ${photos.size} 张, 耗时 ${tQueryEnd - tQueryStart}ms")
+
+            // 内存快照
+            val rt = Runtime.getRuntime()
+            val memUsed = (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024
+            val memMax = rt.maxMemory() / 1024 / 1024
+            Log.d(tag, "🧠 当前堆内存: ${memUsed}MB / ${memMax}MB (max)")
+
+            // ── 阶段2：提交到 Adapter ──
             allPhotos.clear()
             allPhotos.addAll(photos)
+            val tSubmitStart = System.currentTimeMillis()
             adapter.submitList(photos)
+            val tSubmitEnd = System.currentTimeMillis()
+            Log.d(tag, "⏱️ [阶段2] submitList + 首屏 onBind 触发完成: ${tSubmitEnd - tSubmitStart}ms")
+
             updateConfirmButton()
             // 加载完成：隐藏进度条，显示网格
             progressBar.visibility = View.GONE
             rvGallery.visibility = View.VISIBLE
-            Log.d(tag, "加载完成: ${photos.size} 张照片")
+            val totalElapsed = System.currentTimeMillis() - onCreateTime
+            Log.d(tag, "✅ 相册就绪，总耗时: ${totalElapsed}ms")
         }
     }
 
@@ -121,8 +144,8 @@ class GalleryPickerActivity : AppCompatActivity() {
         val queryArgs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             // Android 11+：用 Bundle 参数限制查询数量，避免全盘扫描超时
             Bundle().apply {
-                putInt("android:query-arg-limit", QUERY_LIMIT)
-                putStringArray("android:query-arg-sql-sort-order", arrayOf(sortOrder))
+                putInt(android.content.ContentResolver.QUERY_ARG_LIMIT, QUERY_LIMIT)
+                putString(android.content.ContentResolver.QUERY_ARG_SQL_SORT_ORDER, sortOrder)
             }
         } else {
             null

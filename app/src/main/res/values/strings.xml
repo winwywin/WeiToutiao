@@ -13,4 +13,18 @@
     <string name="wtt_upload_compress">正在压缩 %1$d/%2$d…</string>
     <string name="wtt_upload_send">正在上传 %1$d/%2$d…</string>
     <string name="wtt_publish_success">发布成功</string>
+
+    <!-- Day 17+: 字数统计 -->
+    <!-- %1$d = 当前字数, %2$d = 上限 -->
+    <string name="wtt_char_count_format">%1$d/%2$d</string>
+    <string name="wtt_char_count_placeholder">0/2000</string>
+    <string name="wtt_char_limit_exceeded">已超出字数上限</string>
+
+    <!-- Day 17+: 发布成功页 -->
+    <string name="wtt_publish_success_title">发布成功</string>
+    <string name="wtt_btn_continue_publish">继续发布</string>
+    <string name="wtt_btn_back_home">返回</string>
+    <string name="wtt_success_images_fmt">共 %1$d 张图片</string>
+    <string name="wtt_success_text_empty">（纯图片分享）</string>
+    <string name="wtt_success_images_empty">（纯文字分享）</string>
 </resources>

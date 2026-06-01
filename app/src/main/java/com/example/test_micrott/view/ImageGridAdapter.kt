@@ -15,6 +15,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.util.Collections
 
@@ -39,6 +41,9 @@ class ImageGridAdapter(
 
     private val maxImageCount = 9
 
+    /** 限制同时解码的图片数量，防止 9 张图同时并发导致 IO 线程池饱和/ANR */
+    private val decodeSemaphore = Semaphore(3)
+
     private var mSelectedImages = ArrayList<Uri>()
     private var mAddListener: (() -> Unit)? = null
     private var mDeleteListener: ((Int) -> Unit)? = null
@@ -60,10 +65,8 @@ class ImageGridAdapter(
     fun updateData(images: List<Uri>) {
         val oldList = mSelectedImages
         val newList = ArrayList(images)
-        val diffResult = DiffUtil.calculateDiff(DiffCallback(oldList, newList))
 
-        // P2 修复：只移除"不再存在"的 URI 对应的缓存条目，
-        // 避免无条件 evictAll() 导致每次增删图片都重新解码所有缩略图。
+        // 移除不再存在的缓存条目，避免无条件 evictAll()
         val newKeys = newList.map { it.toString() }.toHashSet()
         oldList.forEach { uri ->
             val key = uri.toString()
@@ -73,10 +76,26 @@ class ImageGridAdapter(
         }
 
         mSelectedImages = newList
-        diffResult.dispatchUpdatesTo(this)
+        // 改用 notifyDataSetChanged，避免 DiffUtil 与「加号按钮」的竞态导致 ViewHolder 位置错乱
+        notifyDataSetChanged()
     }
 
     fun getImages(): List<Uri> = mSelectedImages
+
+    /**
+     * 拖拽过程中实时预览换位：单次 swap + notifyItemMoved，不通知 ViewModel。
+     *
+     * ItemTouchHelper 逐相邻位置回调 onMove（例如 2→3, 3→4, 4→5），
+     * 因此每次只交换相邻两个数据项，notifyItemMoved(from, to) 精确匹配单步移动。
+     * 松手后由 clearView 收集最终顺序，一次性提交通知 ViewModel。
+     */
+    fun previewOnItemMove(fromPosition: Int, toPosition: Int) {
+        if ((fromPosition !in mSelectedImages.indices) || (toPosition !in mSelectedImages.indices)) return
+        if (fromPosition == toPosition) return
+
+        Collections.swap(mSelectedImages, fromPosition, toPosition)
+        notifyItemMoved(fromPosition, toPosition)
+    }
 
     /**
      * 拖拽排序：交换数据源中的两个位置，并通知回调 → ViewModel
@@ -167,10 +186,13 @@ class ImageGridAdapter(
             holder.imageView.setImageDrawable(ColorDrawable(0xFFE8E8E8.toInt()))
 
             holder.loadJob = scope.launch {
-                val bitmap = withContext(Dispatchers.IO) {
-                    ImageCompressor.decodeSampledBitmap(
-                        holder.itemView.context, uri
-                    )
+                val bitmap = decodeSemaphore.withPermit {
+                    withContext(Dispatchers.IO) {
+                        ImageCompressor.decodeSampledBitmap(
+                            holder.itemView.context, uri,
+                            targetWidth = 800, targetHeight = 800
+                        )
+                    }
                 }
                 if (bitmap != null) {
                     ThumbnailCache.put(cacheKey, bitmap)

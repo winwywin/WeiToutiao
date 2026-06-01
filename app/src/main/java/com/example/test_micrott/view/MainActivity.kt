@@ -59,14 +59,19 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var imageGridAdapter: ImageGridAdapter
 
-    // Day 8 新增：追踪上一次 loading 状态，用于检测"发布完成"瞬间显示 Toast
-    private var wasLoading = false
-
     // Day 8 新增：缓存上次图片列表引用，避免每帧打字触发 notifyDataSetChanged
     private var lastImageList: List<Uri> = emptyList()
 
     // Day 16 新增：格式化工具栏状态
     private var isFormattingToolbarVisible = false
+
+    // Day 16 type-ahead：无选区时点击格式按钮 → 激活待定格式 → 后续输入自动带格式（类似 Word）
+    private var pendingBoldActive = false
+    private var pendingItalicActive = false
+    private var pendingColor: Int? = null
+
+    // 防止 TextWatcher 在程序化文本变更时误触发待定格式应用
+    private var isProgrammaticChange = false
 
     // Day 11 升级：自定义相册选择器，支持已选照片跨会话勾选标记
     private val pickMultipleMedia = registerForActivityResult(
@@ -139,13 +144,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Day 11 重构：松手吸附式拖拽排序
+     * Day 11 → Day 31 重构：实时占位预览式拖拽排序
      *
-     * 旧行为（Day 7）：拖动过程中经过某个位置时立即交换 — 用户体验差。
-     * 新行为：长按提起 → 自由拖动（不交换）→ 松手后自动吸附到最近网格位置。
+     * 旧行为（Day 11）：onMove 返回 false，松手后一次性计算目标位置并交换。
+     * 新行为：拖动过程中 onMove 返回 true + notifyItemMoved，
+     *        其他图片实时让出空位（类似手机桌面图标拖动），
+     *        但只有松手才提交最终顺序到 ViewModel。
      *
-     * 实现：onMove 始终返回 false，禁止实时交换；clearView 时用
-     *       findChildViewUnder 找到距离松手位置最近的格子，做单次移动。
+     * 实现：onMove → previewOnItemMove（仅本地交换 + 动画，不通知 VM）
+     *       clearView → 收集最终顺序 → ReorderImages 通知 VM
      */
     private var dragStartPosition = RecyclerView.NO_POSITION
 
@@ -160,12 +167,16 @@ class MainActivity : AppCompatActivity() {
                 viewHolder: RecyclerView.ViewHolder,
                 target: RecyclerView.ViewHolder
             ): Boolean {
-                // 加号格子 / 任何格子：拖动过程中均不换位
+                // 加号格子不允许拖入
                 if (viewHolder is ImageGridAdapter.AddViewHolder ||
                     target is ImageGridAdapter.AddViewHolder) {
                     return false
                 }
-                return false
+                // Day 31：实时预览换位，仅本地交换 + 动画，不通知 ViewModel
+                val from = viewHolder.adapterPosition
+                val to = target.adapterPosition
+                imageGridAdapter.previewOnItemMove(from, to)
+                return true
             }
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
@@ -195,43 +206,13 @@ class MainActivity : AppCompatActivity() {
                 dragStartPosition = RecyclerView.NO_POSITION
                 if (from == RecyclerView.NO_POSITION) return
 
-                // 计算拖拽项松手时的中心点（包含拖拽位移 translationX/Y）
-                val itemView = viewHolder.itemView
-                val centerX = itemView.left + itemView.translationX +
-                        itemView.width / 2f
-                val centerY = itemView.top + itemView.translationY +
-                        itemView.height / 2f
-
-                val imageCount = imageGridAdapter.getImages().size
-                val spanCount = 3
-                var targetPos = RecyclerView.NO_POSITION
-
-                // 先尝试找中心点正下方格子
-                val childUnder = recyclerView.findChildViewUnder(centerX, centerY)
-                if (childUnder != null) {
-                    targetPos = recyclerView.getChildAdapterPosition(childUnder)
-                }
-
-                // 拖到空白区域/无 childView → 根据坐标手动算网格位置
-                if (targetPos == RecyclerView.NO_POSITION) {
-                    val cellW = (recyclerView.width - recyclerView.paddingLeft -
-                            recyclerView.paddingRight).toFloat() / spanCount
-                    val cellH = itemView.height.toFloat()
-                    val col = ((centerX - recyclerView.paddingLeft) / cellW)
-                        .toInt().coerceIn(0, spanCount - 1)
-                    val row = ((centerY - recyclerView.paddingTop) / cellH)
-                        .toInt().coerceAtLeast(0)
-                    targetPos = (row * spanCount + col).coerceIn(0, imageCount - 1)
-                }
-
-                // 过滤加号位置：不允许吸附到加号
-                if (targetPos >= imageCount) {
-                    targetPos = imageCount - 1
-                }
-
-                if (targetPos != from && targetPos >= 0) {
-                    imageGridAdapter.moveSingleItem(from, targetPos)
-                }
+                // Day 31 修复：拖拽过程中已在本地完成所有交换（previewOnItemMove），
+                // adapter 的数据顺序就是最终顺序。松手时：
+                //   1. 先同步 lastImageList，让 render() 跳过 updateData（防止 notifyDataSetChanged 打断动画）
+                //   2. 再通知 ViewModel 更新，保持状态一致
+                val finalOrder = ArrayList(imageGridAdapter.getImages())
+                lastImageList = finalOrder          // ← 防止 render() 回调覆盖 adapter 的正确顺序
+                viewModel.sendIntent(PublishIntent.ReorderImages(finalOrder))
             }
         }
         ItemTouchHelper(callback).attachToRecyclerView(binding.gridImageContainer)
@@ -338,6 +319,14 @@ class MainActivity : AppCompatActivity() {
             EmojiPickerDialog { emoji -> insertEmojiAtCursor(emoji) }
                 .show(supportFragmentManager, "EmojiPicker")
         }
+
+        // Day 17+: 发布成功页按钮
+        binding.btnSuccessContinue.setOnClickListener {
+            dismissSuccessPage()
+        }
+        binding.btnSuccessBack.setOnClickListener {
+            dismissSuccessPage()
+        }
     }
 
     private fun observeUiState() {
@@ -361,6 +350,14 @@ class MainActivity : AppCompatActivity() {
      */
     private fun render(state: PublishState) {
         Log.d(tag, "📺 [View] 收到新 State 账本，开始渲染: isLoading=${state.isLoading}, textLen=${state.text.length}, images=${state.selectedImages.size}")
+
+        // ================================================================
+        // 0. 发布成功页（最高优先级，覆盖一切）
+        // ================================================================
+        if (state.publishSuccess) {
+            renderSuccessPage(state)
+            return
+        }
 
         val loading = state.isLoading
 
@@ -418,28 +415,97 @@ class MainActivity : AppCompatActivity() {
         //    正常打字时 EditText.text == state.text，此分支不触发，避免光标跳动
         // ================================================================
         if (binding.ktg.text.toString() != state.text) {
+            isProgrammaticChange = true
             binding.ktg.setText(state.text)
+            isProgrammaticChange = false
             reapplyProtectedSpans()
             reapplyFormattingSpans(state.formatSpanDescriptors)  // Day 16: 旋转恢复格式 Span
             binding.ktg.setSelection(state.text.length)
         }
 
         // ================================================================
-        // 6. 九宫格：仅图片列表引用变化时才 updateData，避免每帧打字触发
-        //    notifyDataSetChanged（PublishState.copy 对未改字段保持原引用）
+        // 5b. 字数统计显示
         // ================================================================
-        if (state.selectedImages !== lastImageList) {
-            imageGridAdapter.updateData(state.selectedImages)
-            lastImageList = state.selectedImages
+        binding.tvCharCount.text = getString(
+            R.string.wtt_char_count_format,
+            state.charCount,
+            state.maxCharLimit
+        )
+        if (state.isCharLimitExceeded) {
+            binding.tvCharCount.setTextColor("#F85149".toColorInt())   // 红色警告
+        } else {
+            binding.tvCharCount.setTextColor("#999999".toColorInt())   // 正常灰色
         }
 
         // ================================================================
-        // 7. 发布完成检测：loading 从 true→false + 表单已清空 → 弹 Toast
+        // 6. 九宫格：仅图片列表内容变化时才 updateData，避免每帧打字触发
+        //    notifyDataSetChanged，以及拖拽松手后 ViewModel 回写相同顺序
+        //    导致 notifyDataSetChanged 打断 ItemTouchHelper 松手动画。
+        //    用内容比较（==）而非引用比较（===）。
         // ================================================================
-        if (wasLoading && !loading && state.text.isEmpty() && state.selectedImages.isEmpty()) {
-            Toast.makeText(this, R.string.wtt_publish_success, Toast.LENGTH_SHORT).show()
+        if (state.selectedImages != lastImageList) {
+            imageGridAdapter.updateData(state.selectedImages)
+            lastImageList = state.selectedImages
         }
-        wasLoading = loading
+    }
+
+    // ========================================================================
+    // 发布成功页
+    // ========================================================================
+
+    /**
+     * 渲染发布成功页，展示刚发布的内容摘要。
+     * 此方法在 render() 入口被 state.publishSuccess 拦截调用，
+     * 此时正常编辑 UI 全部隐藏，仅显示成功页。
+     */
+    private fun renderSuccessPage(state: PublishState) {
+        // 隐藏正常编辑 UI
+        binding.mai.visibility = View.GONE           // 顶部标题栏
+        binding.kta.visibility = View.GONE           // 内容滚动区
+        binding.formattingToolbarContainer.visibility = View.GONE
+        binding.bottomToolbarContainer.visibility = View.GONE
+        binding.progressBarOverlay.visibility = View.GONE
+
+        // 显示成功页
+        binding.successOverlay.visibility = View.VISIBLE
+
+        // 发布文本摘要
+        if (state.publishResultText.isNotBlank()) {
+            binding.tvSuccessText.text = state.publishResultText
+        } else {
+            binding.tvSuccessText.text = getString(
+                if (state.publishResultImageCount > 0) R.string.wtt_success_text_empty
+                else R.string.wtt_success_text_empty
+            )
+        }
+
+        // 图片数量
+        if (state.publishResultImageCount > 0) {
+            binding.tvSuccessImages.text = getString(
+                R.string.wtt_success_images_fmt,
+                state.publishResultImageCount
+            )
+            binding.tvSuccessImages.visibility = View.VISIBLE
+        } else {
+            binding.tvSuccessImages.text = getString(R.string.wtt_success_images_empty)
+            binding.tvSuccessImages.visibility = View.VISIBLE
+        }
+
+        Log.d(tag, "✅ [View] 发布成功页已渲染")
+    }
+
+    /**
+     * 用户点击"继续发布"或"返回"关闭成功页。
+     * 通知 ViewModel 重置表单，恢复编辑模式。
+     */
+    private fun dismissSuccessPage() {
+        binding.successOverlay.visibility = View.GONE
+        // 恢复正常编辑 UI
+        binding.mai.visibility = View.VISIBLE
+        binding.kta.visibility = View.VISIBLE
+        binding.bottomToolbarContainer.visibility = View.VISIBLE
+        // 格式化工具栏根据文本内容决定显示
+        viewModel.sendIntent(PublishIntent.DismissSuccess)
     }
 
     // ========================================================================
@@ -464,7 +530,9 @@ class MainActivity : AppCompatActivity() {
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
         )
 
+        isProgrammaticChange = true
         editable.replace(start, end, spannableStringBuilder)
+        isProgrammaticChange = false
         binding.ktg.setSelection(start + topicText.length)
 
         viewModel.sendIntent(PublishIntent.InsertTopic(topicText))
@@ -558,7 +626,9 @@ class MainActivity : AppCompatActivity() {
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
         )
 
+        isProgrammaticChange = true
         editable.replace(start, end, spannableStringBuilder)
+        isProgrammaticChange = false
         binding.ktg.setSelection(start + mentionText.length)
 
         viewModel.sendIntent(PublishIntent.InsertMention(mentionText))
@@ -583,7 +653,9 @@ class MainActivity : AppCompatActivity() {
             end = editable.length
         }
 
+        isProgrammaticChange = true
         editable.replace(start, end, emoji)
+        isProgrammaticChange = false
         binding.ktg.setSelection(start + emoji.length)
         Log.d(tag, "😊 [View] 插入表情: $emoji")
     }
@@ -694,6 +766,9 @@ class MainActivity : AppCompatActivity() {
                 hideFormattingToolbar()
             }
         }
+
+        // Day 16 type-ahead：监听输入，自动应用待定格式
+        binding.ktg.addTextChangedListener(TypeAheadTextWatcher())
     }
 
     private fun showFormattingToolbar() {
@@ -708,24 +783,36 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 根据当前光标/选区位置更新 B/I/A 按钮的高亮状态。
+     * 待定格式（type-ahead）优先级高于光标位置检测。
      */
     private fun updateFormattingButtonStates(selStart: Int, selEnd: Int) {
         val editable = binding.ktg.text ?: return
 
-        val checkStart = if (selStart == selEnd) selStart else selStart
-        val checkEnd = if (selStart == selEnd) {
-            (selEnd + 1).coerceAtMost(editable.length)
-        } else selEnd
-
-        if (checkStart < 0 || checkStart >= editable.length) {
-            resetFormattingButtonStates()
-            return
+        // B 按钮：待定粗体 或 光标位置有粗体 Span
+        val isBold = pendingBoldActive || run {
+            val checkStart = if (selStart == selEnd) selStart else selStart
+            val checkEnd = if (selStart == selEnd) {
+                (selEnd + 1).coerceAtMost(editable.length)
+            } else selEnd
+            if (checkStart < 0 || checkStart >= editable.length) false
+            else {
+                editable.getSpans(checkStart, checkEnd, StyleSpan::class.java)
+                    .any { it.style == Typeface.BOLD }
+            }
         }
 
-        // 检查粗体
-        val styleSpans = editable.getSpans(checkStart, checkEnd, StyleSpan::class.java)
-        val isBold = styleSpans.any { it.style == Typeface.BOLD }
-        val isItalic = styleSpans.any { it.style == Typeface.ITALIC }
+        // I 按钮：待定斜体 或 光标位置有斜体 Span
+        val isItalic = pendingItalicActive || run {
+            val checkStart = if (selStart == selEnd) selStart else selStart
+            val checkEnd = if (selStart == selEnd) {
+                (selEnd + 1).coerceAtMost(editable.length)
+            } else selEnd
+            if (checkStart < 0 || checkStart >= editable.length) false
+            else {
+                editable.getSpans(checkStart, checkEnd, StyleSpan::class.java)
+                    .any { it.style == Typeface.ITALIC }
+            }
+        }
 
         binding.barBold.setTextColor(
             if (isBold) "#2A62FF".toColorInt() else "#555555".toColorInt()
@@ -734,14 +821,22 @@ class MainActivity : AppCompatActivity() {
             if (isItalic) "#2A62FF".toColorInt() else "#555555".toColorInt()
         )
 
-        // 检查文字颜色（排除话题/提及蓝色）
+        // A 按钮：待定颜色 或 光标位置有颜色 Span（排除话题/提及蓝色）
         val topicMentionColor = "#2A62FF".toColorInt()
-        val colorSpans = editable.getSpans(checkStart, checkEnd, ForegroundColorSpan::class.java)
-        val activeColorSpan = colorSpans.firstOrNull {
-            it.foregroundColor != topicMentionColor
+        val activeColor = pendingColor ?: run {
+            val checkStart = if (selStart == selEnd) selStart else selStart
+            val checkEnd = if (selStart == selEnd) {
+                (selEnd + 1).coerceAtMost(editable.length)
+            } else selEnd
+            if (checkStart < 0 || checkStart >= editable.length) null
+            else {
+                editable.getSpans(checkStart, checkEnd, ForegroundColorSpan::class.java)
+                    .firstOrNull { it.foregroundColor != topicMentionColor }
+                    ?.foregroundColor
+            }
         }
         binding.barColor.setTextColor(
-            activeColorSpan?.foregroundColor ?: "#555555".toColorInt()
+            activeColor ?: "#555555".toColorInt()
         )
     }
 
@@ -752,33 +847,40 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 切换选中文本的粗体格式。
+     * 切换粗体格式。
      *
-     * 处理四种情况：
-     * 1. 选区完全在粗体 Span 内 → 拆分移除
-     * 2. 选区无粗体 → 添加 StyleSpan(Typeface.BOLD)
-     * 3. 选区部分覆盖粗体 → 拆分
-     * 4. 无选区 → 不操作
+     * - 有选区：对选区文字应用/移除粗体（原有逻辑）
+     * - 无选区：切换待定粗体状态，后续输入自动带粗体（类似 Word type-ahead）
      */
     private fun toggleBold() {
         val editable = binding.ktg.text ?: return
         val selStart = binding.ktg.selectionStart
         val selEnd = binding.ktg.selectionEnd
 
-        if (selStart < 0 || selStart == selEnd) return // 需要选区
+        // ================================================================
+        // Type-Ahead 模式：无选区 → 切换待定格式
+        // ================================================================
+        if (selStart < 0 || selStart == selEnd) {
+            pendingBoldActive = !pendingBoldActive
+            updateFormattingButtonStates(selStart, selEnd)
+            return
+        }
+
+        // ================================================================
+        // 选区模式：对选中文字应用/移除粗体
+        // ================================================================
+        clearPendingFormats()
 
         val existingBoldSpans = editable.getSpans(selStart, selEnd, StyleSpan::class.java)
             .filter { it.style == Typeface.BOLD }
 
         if (existingBoldSpans.isNotEmpty()) {
-            // 移除模式：处理每个重叠的粗体 Span
             existingBoldSpans.forEach { span ->
                 removeSpanFromSelection(editable, span, selStart, selEnd) {
                     StyleSpan(Typeface.BOLD)
                 }
             }
         } else {
-            // 添加模式
             editable.setSpan(
                 StyleSpan(Typeface.BOLD), selStart, selEnd,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
@@ -790,14 +892,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 切换选中文本的斜体格式。逻辑与 toggleBold() 一致。
+     * 切换斜体格式。
+     *
+     * - 有选区：对选区文字应用/移除斜体
+     * - 无选区：切换待定斜体状态，后续输入自动带斜体
      */
     private fun toggleItalic() {
         val editable = binding.ktg.text ?: return
         val selStart = binding.ktg.selectionStart
         val selEnd = binding.ktg.selectionEnd
 
-        if (selStart < 0 || selStart == selEnd) return
+        // Type-Ahead 模式
+        if (selStart < 0 || selStart == selEnd) {
+            pendingItalicActive = !pendingItalicActive
+            updateFormattingButtonStates(selStart, selEnd)
+            return
+        }
+
+        // 选区模式
+        clearPendingFormats()
 
         val existingItalicSpans = editable.getSpans(selStart, selEnd, StyleSpan::class.java)
             .filter { it.style == Typeface.ITALIC }
@@ -820,16 +933,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 弹出颜色选择器，锚定到 A 按钮。
+     * 弹出颜色选择器。
+     *
+     * - 有选区：选色后直接应用到选区文字
+     * - 无选区：选色后激活待定颜色，后续输入自动带该颜色（类似 Word type-ahead）
      */
     private fun showColorPicker() {
         if (binding.ktg.text.isNullOrEmpty()) return
         val selStart = binding.ktg.selectionStart
         val selEnd = binding.ktg.selectionEnd
-        if (selStart < 0 || selStart == selEnd) return // 需要选区
+
+        val hasSelection = selStart >= 0 && selStart != selEnd
 
         ColorPickerPopup(this) { color ->
-            applyTextColor(color, selStart, selEnd)
+            if (hasSelection) {
+                // 选区模式：直接应用颜色
+                clearPendingFormats()
+                applyTextColor(color, selStart, selEnd)
+            } else {
+                // Type-Ahead 模式：激活待定颜色
+                pendingColor = color
+                updateFormattingButtonStates(selStart, selEnd)
+                Log.d(tag, "🎨 [View] 待定文字颜色已激活: #${Integer.toHexString(color)}")
+            }
         }.show(binding.barColor)
     }
 
@@ -991,5 +1117,99 @@ class MainActivity : AppCompatActivity() {
         }
 
         Log.d(tag, "🎨 [View] 格式化 Span 已恢复: ${descriptors.size} 个")
+    }
+
+    // ========================================================================
+    // Day 16: Type-Ahead 格式化 — TextWatcher 自动应用待定格式到新输入文字
+    // ========================================================================
+
+    /**
+     * 监听 EditText 文本变更，当有待定格式（pendingBold/pendingItalic/pendingColor）
+     * 且用户正在输入新字符时，自动将待定 Span 应用到新输入的字符上。
+     *
+     * 类似 Word：先点 B 再打字 → 打出的是粗体。
+     */
+    private inner class TypeAheadTextWatcher : android.text.TextWatcher {
+        private var insertStart = 0
+        private var insertLen = 0
+
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
+            if (isProgrammaticChange) return
+            // start: 变更起始位置（即光标/选区起点）
+            // after: 将要新增的字符数（纯输入时 count=0, after>0）
+            insertStart = start
+            insertLen = after
+        }
+
+        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+            // 不需要
+        }
+
+        override fun afterTextChanged(s: android.text.Editable?) {
+            if (isProgrammaticChange) return
+            if (s == null || insertLen <= 0) return
+            if (!hasPendingFormat()) return
+
+            val end = (insertStart + insertLen).coerceAtMost(s.length)
+            if (insertStart >= end) return
+
+            applyPendingSpansToRange(s, insertStart, end)
+
+            // 插入完成后不清除待定格式（用户可能继续打字），
+            // 但需要刷新按钮状态以反映当前光标位置
+            updateFormattingButtonStates(
+                binding.ktg.selectionStart,
+                binding.ktg.selectionEnd
+            )
+        }
+    }
+
+    /** 是否有任何待定格式处于激活状态 */
+    private fun hasPendingFormat(): Boolean {
+        return pendingBoldActive || pendingItalicActive || pendingColor != null
+    }
+
+    /**
+     * 将当前所有待定格式的 Span 应用到 Editable 的 [start, end) 范围。
+     * 跳过话题/提及的 #2A62FF 保护色区域。
+     */
+    private fun applyPendingSpansToRange(editable: android.text.Editable, start: Int, end: Int) {
+        if (pendingBoldActive) {
+            // 先清除该范围内已有的粗体 Span（避免叠加）
+            val existing = editable.getSpans(start, end, StyleSpan::class.java)
+                .filter { it.style == Typeface.BOLD }
+            existing.forEach { editable.removeSpan(it) }
+            editable.setSpan(
+                StyleSpan(Typeface.BOLD), start, end,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+        if (pendingItalicActive) {
+            val existing = editable.getSpans(start, end, StyleSpan::class.java)
+                .filter { it.style == Typeface.ITALIC }
+            existing.forEach { editable.removeSpan(it) }
+            editable.setSpan(
+                StyleSpan(Typeface.ITALIC), start, end,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+        pendingColor?.let { color ->
+            val topicMentionColor = "#2A62FF".toColorInt()
+            // 清除该范围内已有的非保护色 Span
+            val existing = editable.getSpans(start, end, ForegroundColorSpan::class.java)
+                .filter { it.foregroundColor != topicMentionColor }
+            existing.forEach { editable.removeSpan(it) }
+            editable.setSpan(
+                ForegroundColorSpan(color), start, end,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+    }
+
+    /** 清除所有待定格式（用户显式选中文本应用格式时调用） */
+    private fun clearPendingFormats() {
+        pendingBoldActive = false
+        pendingItalicActive = false
+        pendingColor = null
     }
 }

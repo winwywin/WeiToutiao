@@ -7,14 +7,14 @@ import android.util.LruCache
  * 缩略图内存缓存，供 ImageGridAdapter 和 GalleryPickerAdapter 共用。
  *
  * 容量限制：
- *   - 单张 300×300 RGBA 缩略图 ≈ 360KB
- *   - 4MB ≈ 11 张，覆盖 9 宫格 + 滚动缓冲
+ *   - 单张 800×800 RGBA 缩略图 ≈ 2.56MB
+ *   - 16MB ≈ 6 张，覆盖 9 宫格常用缓存
  *
  * Key: URI.toString()
  */
 object ThumbnailCache {
 
-    private val maxSizeBytes = 4 * 1024 * 1024 // 4MB
+    private val maxSizeBytes = 16 * 1024 * 1024 // 16MB
 
     private val cache = object : LruCache<String, Bitmap>(maxSizeBytes) {
         override fun sizeOf(key: String, value: Bitmap): Int {

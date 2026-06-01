@@ -113,8 +113,10 @@ class PublishViewModel(
             is PublishIntent.ClickPublish -> handleClickPublish()
             is PublishIntent.InsertTopic -> handleInsertTopic(intent.topicText)
             is PublishIntent.MoveImage -> handleMoveImage(intent.from, intent.to)
+            is PublishIntent.ReorderImages -> handleReorderImages(intent.uris)
             is PublishIntent.InsertMention -> handleInsertMention(intent.mentionText)
             is PublishIntent.SaveFormattingSpans -> handleSaveFormatting(intent.descriptors)
+            is PublishIntent.DismissSuccess -> handleDismissSuccess()
         }
     }
 
@@ -132,16 +134,22 @@ class PublishViewModel(
     private fun handleTextChanged(newText: String) {
         if (_state.value.text == newText) return
 
-        val isButtonEnabled = newText.trim().isNotEmpty() || _state.value.selectedImages.isNotEmpty()
+        val charCount = newText.length
+        val isExceeded = charCount > PublishState.MAX_CHAR_LIMIT
+        // 超限时不启用发布按钮（即使有图片）
+        val hasContent = !isExceeded && (newText.trim().isNotEmpty() || _state.value.selectedImages.isNotEmpty())
+        val isButtonEnabled = hasContent
 
         val newState = _state.value.copy(
             text = newText,
             isPublishButtonEnabled = isButtonEnabled,
+            charCount = charCount,
+            isCharLimitExceeded = isExceeded,
         )
         _state.value = newState
         // ⚠️ 不再 persistState — 见上方注释
 
-        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [TextChanged] -> 吐出新State")
+        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [TextChanged] -> charCount=$charCount, exceeded=$isExceeded")
     }
 
     /**
@@ -290,19 +298,36 @@ class PublishViewModel(
             }
 
             // ================================================================
-            // Step 3: 清理临时文件 + 重置 State
+            // Step 3: 清理临时文件 + 进入发布成功状态
             // ================================================================
             withContext(Dispatchers.IO) {
                 compressedFiles.forEach { it.delete() }
                 Log.d(tag, "🗑️ [ViewModel] 清理临时压缩文件 ${compressedFiles.size} 个")
             }
 
-            val resetState = PublishState() // 所有字段默认值
-            _state.value = resetState
-            persistState(resetState)
+            // 保存发布结果（供成功页展示），然后切换到成功状态
+            val publishText = _state.value.text
+            val publishImageCount = _state.value.selectedImages.size
 
-            Log.d(tag, "✅ [ViewModel] 发布完成，表单已重置")
+            val successState = PublishState(
+                publishSuccess = true,
+                publishResultText = publishText,
+                publishResultImageCount = publishImageCount,
+            )
+            _state.value = successState
+
+            Log.d(tag, "✅ [ViewModel] publish done: textLen=${publishText.length}, images=$publishImageCount")
         }
+    }
+
+    /**
+     * 用户关闭发布成功页 → 重置为编辑模式（空表单）
+     */
+    private fun handleDismissSuccess() {
+        val resetState = PublishState()
+        _state.value = resetState
+        persistState(resetState)
+        Log.d(tag, "📝 [ViewModel] 成功页已关闭，表单已重置")
     }
 
     /**
@@ -366,5 +391,19 @@ class PublishViewModel(
         persistState(newState)
 
         Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [MoveImage] -> $from ↔ $to")
+    }
+
+    /**
+     * 拖拽松手后提交完整最终顺序（替代逐帧 MoveImage）
+     */
+    private fun handleReorderImages(uris: List<Uri>) {
+        if (uris.size != _state.value.selectedImages.size) {
+            Log.w(tag, "⚠️ [ReorderImages] 数量不匹配，忽略")
+            return
+        }
+        val newState = _state.value.copy(selectedImages = uris)
+        _state.value = newState
+        persistState(newState)
+        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [ReorderImages] → ${uris.size} 张")
     }
 }

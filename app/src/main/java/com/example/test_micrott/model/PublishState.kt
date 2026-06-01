@@ -42,4 +42,17 @@ data class PublishState(
     val uploadProgress: Int = 0,
     // Day 17: 上传步骤（结构化，不含硬编码字符串）
     val uploadStatus: UploadStatus = UploadStatus.Idle,
-)
+    // Day 17+：字数统计
+    val charCount: Int = 0,
+    val maxCharLimit: Int = MAX_CHAR_LIMIT,
+    val isCharLimitExceeded: Boolean = false,
+    // Day 17+：发布成功结果页
+    val publishSuccess: Boolean = false,
+    val publishResultText: String = "",
+    val publishResultImageCount: Int = 0,
+) {
+    companion object {
+        /** 微头条字数上限（与今日头条一致） */
+        const val MAX_CHAR_LIMIT = 2000
+    }
+}

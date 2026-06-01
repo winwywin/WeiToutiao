@@ -24,12 +24,18 @@ sealed class PublishIntent {
     // 5. 用户点击底部工具栏的"# 话题"按钮，插入话题标签
     data class InsertTopic(val topicText: String) : PublishIntent()
 
-    // 6. 用户拖拽九宫格图片调整顺序
+    // 6. 用户拖拽九宫格图片调整顺序（拖拽过程中逐帧回调，已废弃，改用 ReorderImages）
     data class MoveImage(val from: Int, val to: Int) : PublishIntent()
+
+    // 6b. 用户拖拽松手后，提交完整的最终顺序（替代逐帧 MoveImage）
+    data class ReorderImages(val uris: List<Uri>) : PublishIntent()
 
     // 7. 用户点击底部工具栏"@"提及按钮，选中用户后插入 @用户名
     data class InsertMention(val mentionText: String) : PublishIntent()
 
     // 8. View 层通知 ViewModel 保存当前格式化 Span 描述符（用于旋转恢复）
     data class SaveFormattingSpans(val descriptors: List<SpanDescriptor>) : PublishIntent()
+
+    // 9. 用户关闭发布成功页，回到编辑模式
+    object DismissSuccess : PublishIntent()
 }

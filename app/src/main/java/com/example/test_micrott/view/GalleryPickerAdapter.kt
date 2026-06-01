@@ -6,15 +6,21 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
+import androidx.recyclerview.widget.AsyncListDiffer
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.example.test_micrott.R
+import android.util.Log
 import com.example.test_micrott.util.ImageCompressor
 import com.example.test_micrott.util.ThumbnailCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 自定义相册网格适配器。
@@ -28,17 +34,34 @@ class GalleryPickerAdapter(
     private val onToggle: (Int) -> Unit,
 ) : RecyclerView.Adapter<GalleryPickerAdapter.PhotoViewHolder>() {
 
-    private val items = mutableListOf<GalleryPhoto>()
+    companion object {
+        private const val TAG = "GalleryAdapter"
 
-    fun submitList(newItems: List<GalleryPhoto>) {
-        items.clear()
-        items.addAll(newItems)
-        notifyDataSetChanged()
+        private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<GalleryPhoto>() {
+            override fun areItemsTheSame(oldItem: GalleryPhoto, newItem: GalleryPhoto): Boolean =
+                oldItem.mediaId == newItem.mediaId
+            override fun areContentsTheSame(oldItem: GalleryPhoto, newItem: GalleryPhoto): Boolean =
+                oldItem.isSelected == newItem.isSelected && oldItem.uri == newItem.uri
+        }
+
+        // ── 调试：全局队列统计 ──
+        private val totalSubmitted = AtomicInteger(0)
+        private val totalCompleted = AtomicInteger(0)
+        private val sequence = AtomicInteger(0)
     }
 
-    fun getItem(position: Int): GalleryPhoto = items[position]
+    /** 限制同时解码的图片数量，防止 IO 线程池被 500 张缩略图同时打满 */
+    private val decodeSemaphore = Semaphore(4)
 
-    override fun getItemCount(): Int = items.size
+    private val differ = AsyncListDiffer(this, DIFF_CALLBACK)
+
+    fun submitList(newItems: List<GalleryPhoto>) {
+        differ.submitList(newItems.toList())
+    }
+
+    fun getItem(position: Int): GalleryPhoto = differ.currentList[position]
+
+    override fun getItemCount(): Int = differ.currentList.size
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PhotoViewHolder {
         val view = LayoutInflater.from(parent.context)
@@ -47,7 +70,7 @@ class GalleryPickerAdapter(
     }
 
     override fun onBindViewHolder(holder: PhotoViewHolder, position: Int) {
-        val photo = items[position]
+        val photo = getItem(position)
 
         // Day 8: 异步加载缩略图，复用 ImageCompressor + ThumbnailCache
         loadThumbnailAsync(holder, photo)
@@ -85,19 +108,55 @@ class GalleryPickerAdapter(
 
         holder.imageView.setImageDrawable(ColorDrawable(0xFFE0E0E0.toInt()))
 
+        val seq = sequence.incrementAndGet()
+        val uriSegment = photo.uri.lastPathSegment ?: "?"
+        totalSubmitted.incrementAndGet()
+        val t0 = System.currentTimeMillis()
+
         holder.loadJob = scope.launch {
-            val bitmap = withContext(Dispatchers.IO) {
-                ImageCompressor.decodeSampledBitmap(
-                    holder.itemView.context,
-                    photo.uri,
-                    256, 256
-                )
+            // ── S1: 等待 Semaphore 许可（排队时间） ──
+            val bitmap = decodeSemaphore.withPermit {
+                val tAfterSem = System.currentTimeMillis()
+                val semWait = tAfterSem - t0
+                // ── S2+S3+S4: 实际 IO + 解码（见 ImageCompressor 内部日志） ──
+                val result = withContext(Dispatchers.IO) {
+                    ImageCompressor.decodeSampledBitmap(
+                        holder.itemView.context,
+                        photo.uri,
+                        256, 256
+                    )
+                }
+                val ioTime = System.currentTimeMillis() - tAfterSem
+                val total = System.currentTimeMillis() - t0
+
+                val done = totalCompleted.incrementAndGet()
+                // 每 50 张输出一次队列快照
+                if (done % 50 == 0 || semWait > 200 || ioTime > 300) {
+                    val queued = totalSubmitted.get() - done
+                    Log.w(TAG, "⏱️ [seq=$seq] semWait=${semWait}ms ioTime=${ioTime}ms total=${total}ms " +
+                            "| 队列: 完成=$done 排队中≈$queued | uri=$uriSegment")
+                }
+                result
             }
+
+            // 总耗时（包含 semWait + ioTime）
+            val elapsed = System.currentTimeMillis() - t0
             if (bitmap != null) {
                 ThumbnailCache.put(cacheKey, bitmap)
                 if (holder.adapterPosition != RecyclerView.NO_POSITION) {
                     holder.imageView.setImageBitmap(bitmap)
                 }
+            } else {
+                Log.e(TAG, "❌ 解码失败: uri=$uriSegment (耗时 ${elapsed}ms)")
+            }
+
+            // ── 最后一张输出总结 ──
+            val done = totalCompleted.get()
+            val submitted = totalSubmitted.get()
+            if (done >= submitted && submitted > 0) {
+                Log.w(TAG, "════════════════════════════════")
+                Log.w(TAG, "📊 相册解码总结: 共 $submitted 张全部完成, 并发限制=${decodeSemaphore.availablePermits + 4}槽")
+                Log.w(TAG, "════════════════════════════════")
             }
         }
     }

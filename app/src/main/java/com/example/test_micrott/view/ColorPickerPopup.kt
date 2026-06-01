@@ -36,20 +36,25 @@ class ColorPickerPopup(
     private val popup: PopupWindow
 
     init {
+        val density = context.resources.displayMetrics.density
+        val cellSizeDp = (48 * density).toInt()
+        val cellMarginDp = (8 * density).toInt()
+        val paddingDp = (16 * density).toInt()
+
         val grid = GridLayout(context).apply {
             columnCount = 5
             rowCount = 2
-            setPadding(12, 12, 12, 12)
+            setPadding(paddingDp, paddingDp, paddingDp, paddingDp)
             // 背景: 白底 + 圆角 + 阴影
             background = GradientDrawable().apply {
                 setColor(Color.WHITE)
-                cornerRadius = 12f
+                cornerRadius = 12f * density
                 setStroke(1, "#DDDDDD".toColorInt())
             }
         }
 
-        val cellSize = 44
-        val cellMargin = 6
+        val cellSize = cellSizeDp
+        val cellMargin = cellMarginDp
 
         colors.forEach { color ->
             val circle = View(context).apply {
@@ -61,7 +66,7 @@ class ColorPickerPopup(
                 background = GradientDrawable().apply {
                     setColor(color)
                     shape = GradientDrawable.OVAL
-                    setStroke(2, Color.WHITE)
+                    setStroke((2 * density).toInt(), Color.WHITE)
                 }
                 setOnClickListener {
                     onColorPicked(color)
