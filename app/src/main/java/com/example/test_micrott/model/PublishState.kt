@@ -50,6 +50,12 @@ data class PublishState(
     val publishSuccess: Boolean = false,
     val publishResultText: String = "",
     val publishResultImageCount: Int = 0,
+    // Day 20+：草稿自动保存
+    val hasDraft: Boolean = false,
+    val showDraftPrompt: Boolean = false,  // 弹框展示标记（只展示一次）
+    val draftSavedAt: Long = 0L,
+    val draftTextLength: Int = 0,
+    val draftImageCount: Int = 0,
 ) {
     companion object {
         /** 微头条字数上限（与今日头条一致） */

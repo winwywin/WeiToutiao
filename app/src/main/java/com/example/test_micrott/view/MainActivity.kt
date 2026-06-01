@@ -359,6 +359,19 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        // ================================================================
+        // 0b. 草稿恢复弹框（次高优先级，仅弹一次）
+        // ================================================================
+        if (state.showDraftPrompt && state.hasDraft) {
+            showDraftRestoreDialog(state.draftTextLength, state.draftImageCount, state.draftSavedAt)
+            viewModel.sendIntent(PublishIntent.DraftDetected(
+                textLength = state.draftTextLength,
+                imageCount = state.draftImageCount,
+                savedAt = state.draftSavedAt,
+            ))
+            return
+        }
+
         val loading = state.isLoading
 
         // ================================================================
@@ -506,6 +519,60 @@ class MainActivity : AppCompatActivity() {
         binding.bottomToolbarContainer.visibility = View.VISIBLE
         // 格式化工具栏根据文本内容决定显示
         viewModel.sendIntent(PublishIntent.DismissSuccess)
+    }
+
+    // ========================================================================
+    // Day 20+：草稿恢复弹框
+    // ========================================================================
+
+    /**
+     * 展示草稿恢复确认弹框。
+     * 参照今日头条 WTT 草稿恢复 UI：标题"发现草稿"、摘要、恢复/放弃按钮。
+     *
+     * @param textLength  草稿文本字数
+     * @param imageCount  草稿图片数量
+     * @param savedAt     最后保存时间戳
+     */
+    private fun showDraftRestoreDialog(textLength: Int, imageCount: Int, savedAt: Long) {
+        val meta = com.example.test_micrott.util.DraftMeta(
+            textLength = textLength,
+            imageCount = imageCount,
+            savedAt = savedAt,
+        )
+        val summary = getString(
+            R.string.wtt_draft_found_summary,
+            meta.toPreviewText(),
+            meta.toRelativeTime()
+        )
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.wtt_draft_found_title)
+            .setMessage(summary)
+            .setPositiveButton(R.string.wtt_draft_btn_restore) { _, _ ->
+                Log.d(tag, "📋 [View] 用户选择恢复草稿")
+                viewModel.sendIntent(PublishIntent.RestoreDraft)
+            }
+            .setNegativeButton(R.string.wtt_draft_btn_discard) { _, _ ->
+                Log.d(tag, "🗑️ [View] 用户放弃草稿")
+                viewModel.sendIntent(PublishIntent.DismissDraft)
+            }
+            .setCancelable(false) // 必须明确选择，不能点外部关闭
+            .show()
+
+        Log.d(tag, "📋 [View] 草稿恢复弹框已展示")
+    }
+
+    // ========================================================================
+    // Day 20+：生命周期回调 — App 切后台时强制保存草稿
+    // ========================================================================
+
+    override fun onStop() {
+        super.onStop()
+        // 发布成功页不保存草稿（已发布的内容不需要草稿）
+        if (!viewModel.state.value.publishSuccess) {
+            viewModel.onActivityStop()
+            Log.d(tag, "💾 [View] onStop → 强制保存草稿")
+        }
     }
 
     // ========================================================================

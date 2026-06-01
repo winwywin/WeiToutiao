@@ -38,4 +38,20 @@ sealed class PublishIntent {
 
     // 9. 用户关闭发布成功页，回到编辑模式
     object DismissSuccess : PublishIntent()
+
+    // 10. ViewModel 初始化时检测到草稿，带元信息通知 View 层
+    data class DraftDetected(
+        val textLength: Int,
+        val imageCount: Int,
+        val savedAt: Long
+    ) : PublishIntent()
+
+    // 11. 用户在弹框中点击"恢复"，加载草稿到编辑器
+    object RestoreDraft : PublishIntent()
+
+    // 12. 用户在弹框中点击"放弃"，清除草稿
+    object DismissDraft : PublishIntent()
+
+    // 13. 强制触发一次保存（App 进入后台 / onPause 场景）
+    object ForceSave : PublishIntent()
 }

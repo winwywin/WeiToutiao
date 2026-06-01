@@ -8,6 +8,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.example.test_micrott.model.PublishIntent
 import com.example.test_micrott.model.PublishState
 import com.example.test_micrott.model.SpanDescriptor
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import androidx.lifecycle.viewModelScope
 import com.example.test_micrott.model.UploadStatus
+import com.example.test_micrott.util.DraftManager
 import com.example.test_micrott.util.ImageCompressor
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +44,9 @@ class PublishViewModel(
         private const val KEY_LOADING = "publish_loading"
         private const val KEY_BUTTON_ENABLED = "publish_button_enabled"
         private const val KEY_FORMAT_SPANS = "publish_format_spans"
+
+        // 草稿自动保存防抖间隔（ms）
+        private const val AUTO_SAVE_DEBOUNCE_MS = 3_000L
     }
 
     // 🛡️ 防护隔离防线：对内私有可变，严禁外部直接 `.value = ...` 篡改账本
@@ -52,6 +57,20 @@ class PublishViewModel(
     val state: StateFlow<PublishState> = _state.asStateFlow()
 
     private val tag = "MVI_FRAMEWORK"
+
+    // Day 20+：草稿管理器
+    private val draftManager = DraftManager(getApplication())
+
+    // Day 20+：自动保存防抖 Job（取消旧任务 → 重新 schedule）
+    private var autoSaveJob: Job? = null
+
+    // Day 20+：草稿弹框已展示标记（同一次 ViewModel 生命周期内只弹一次）
+    private var draftPromptShown = false
+
+    init {
+        // 首次启动时检查是否存在草稿
+        checkForDraft()
+    }
 
     // ========================================================================
     // Day 6 新增：SavedStateHandle 状态恢复
@@ -117,6 +136,10 @@ class PublishViewModel(
             is PublishIntent.InsertMention -> handleInsertMention(intent.mentionText)
             is PublishIntent.SaveFormattingSpans -> handleSaveFormatting(intent.descriptors)
             is PublishIntent.DismissSuccess -> handleDismissSuccess()
+            is PublishIntent.DraftDetected -> handleDraftDetected(intent)
+            is PublishIntent.RestoreDraft -> handleRestoreDraft()
+            is PublishIntent.DismissDraft -> handleDismissDraft()
+            is PublishIntent.ForceSave -> handleForceSave()
         }
     }
 
@@ -148,6 +171,7 @@ class PublishViewModel(
         )
         _state.value = newState
         // ⚠️ 不再 persistState — 见上方注释
+        scheduleAutoSave()
 
         Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [TextChanged] -> charCount=$charCount, exceeded=$isExceeded")
     }
@@ -178,6 +202,7 @@ class PublishViewModel(
         )
         _state.value = newState
         persistState(newState)
+        scheduleAutoSave()
 
         Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [ImagesPicked] -> 当前共 ${safetyImages.size} 张")
     }
@@ -198,6 +223,7 @@ class PublishViewModel(
             )
             _state.value = newState
             persistState(newState)
+            scheduleAutoSave()
 
             Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [RemoveImage] -> 删除了索引 $index 的图片")
         }
@@ -316,6 +342,11 @@ class PublishViewModel(
             )
             _state.value = successState
 
+            // Day 20+：发布成功后删除草稿
+            withContext(Dispatchers.IO) {
+                draftManager.deleteDraft()
+            }
+
             Log.d(tag, "✅ [ViewModel] publish done: textLen=${publishText.length}, images=$publishImageCount")
         }
     }
@@ -327,6 +358,11 @@ class PublishViewModel(
         val resetState = PublishState()
         _state.value = resetState
         persistState(resetState)
+        // Day 20+：重置表单意味着放弃当前草稿，异步删除
+        viewModelScope.launch(Dispatchers.IO) {
+            draftManager.deleteDraft()
+        }
+        draftPromptShown = false // 允许下次再弹草稿恢复提示
         Log.d(tag, "📝 [ViewModel] 成功页已关闭，表单已重置")
     }
 
@@ -372,6 +408,7 @@ class PublishViewModel(
         val newState = _state.value.copy(formatSpanDescriptors = descriptors)
         _state.value = newState
         persistState(newState)
+        scheduleAutoSave()
         Log.d(tag, "🎨 [ViewModel] 格式化 Span 已保存: ${descriptors.size} 个")
     }
 
@@ -404,6 +441,156 @@ class PublishViewModel(
         val newState = _state.value.copy(selectedImages = uris)
         _state.value = newState
         persistState(newState)
+        scheduleAutoSave()
         Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [ReorderImages] → ${uris.size} 张")
+    }
+
+    // ========================================================================
+    // Day 20+：草稿自动保存
+    // ========================================================================
+
+    /**
+     * 初始化时检查是否存在草稿。
+     * 从独立的 JSON 文件读取（不依赖 SavedStateHandle），
+     * 跨进程死亡和主动退出均能恢复。
+     *
+     * 只在首次启动时触发一次：后续旋转/config change 由 SavedStateHandle 接管，
+     * 草稿文件本身不变，无需重复弹框。
+     */
+    private fun checkForDraft() {
+        if (draftPromptShown) return
+        val meta = draftManager.getDraftMeta() ?: return
+        if (meta.textLength == 0 && meta.imageCount == 0) {
+            // 空草稿（异常状态），直接清除
+            viewModelScope.launch(Dispatchers.IO) { draftManager.deleteDraft() }
+            return
+        }
+
+        // 避免与 SavedStateHandle 恢复的状态打架：
+        // 如果 SavedStateHandle 已有内容（旋转恢复），跳过草稿弹框
+        val ssText = savedStateHandle.get<String>(KEY_TEXT) ?: ""
+        val ssImages = savedStateHandle.get<ArrayList<Uri>>(KEY_IMAGES)
+        if (ssText.isNotEmpty() || (ssImages != null && ssImages.isNotEmpty())) {
+            Log.d(tag, "🔄 [ViewModel] SavedStateHandle 已有活跃状态，跳过草稿弹框")
+            return
+        }
+
+        draftPromptShown = true
+        _state.value = _state.value.copy(
+            hasDraft = true,
+            showDraftPrompt = true,
+            draftSavedAt = meta.savedAt,
+            draftTextLength = meta.textLength,
+            draftImageCount = meta.imageCount,
+        )
+        Log.d(tag, "📋 [ViewModel] 检测到草稿: text=${meta.textLength}字, images=${meta.imageCount}张, savedAt=${meta.savedAt}")
+    }
+
+    /**
+     * View 层已展示草稿弹框（Activity 在 render 中展示 Dialog 后回传确认）。
+     * 此时更新 state 标记弹框已展示，避免后续重复弹。
+     */
+    private fun handleDraftDetected(intent: PublishIntent.DraftDetected) {
+        // 已由 View 层展示弹框，仅更新标记
+        _state.value = _state.value.copy(
+            showDraftPrompt = false, // 弹框已展示
+            hasDraft = true,
+        )
+        Log.d(tag, "📋 [ViewModel] 草稿弹框已展示")
+    }
+
+    /**
+     * 用户选择恢复草稿：
+     *   1. 从 JSON 文件加载完整数据
+     *   2. 更新 State（文本 + 图片 Uri + Span 描述符）
+     *   3. 删除草稿文件（已恢复到内存，避免下次启动又弹）
+     */
+    private fun handleRestoreDraft() {
+        val draft = draftManager.loadDraft()
+        if (draft == null) {
+            Log.w(tag, "⚠️ [ViewModel] 草稿加载失败")
+            _state.value = _state.value.copy(hasDraft = false, showDraftPrompt = false)
+            return
+        }
+
+        val isButtonEnabled = draft.text.trim().isNotEmpty() || draft.images.isNotEmpty()
+        val charCount = draft.text.length
+        val isExceeded = charCount > PublishState.MAX_CHAR_LIMIT
+
+        val restoredState = _state.value.copy(
+            text = draft.text,
+            selectedImages = draft.images,
+            formatSpanDescriptors = draft.formatSpans,
+            isPublishButtonEnabled = isButtonEnabled && !isExceeded,
+            charCount = charCount,
+            isCharLimitExceeded = isExceeded,
+            hasDraft = false,
+            showDraftPrompt = false,
+        )
+        _state.value = restoredState
+        persistState(restoredState)
+
+        // 删除草稿文件（已恢复到 ViewModel）
+        viewModelScope.launch(Dispatchers.IO) { draftManager.deleteDraft() }
+
+        Log.d(tag, "📋 [ViewModel] 草稿已恢复: text=${draft.text.length}字, images=${draft.images.size}张, spans=${draft.formatSpans.size}")
+    }
+
+    /**
+     * 用户选择放弃草稿：删除草稿文件 + 清除弹框标记。
+     */
+    private fun handleDismissDraft() {
+        viewModelScope.launch(Dispatchers.IO) { draftManager.deleteDraft() }
+        _state.value = _state.value.copy(
+            hasDraft = false,
+            showDraftPrompt = false,
+        )
+        Log.d(tag, "🗑️ [ViewModel] 用户放弃草稿")
+    }
+
+    /**
+     * 强制立即保存草稿（App 进入后台 / onStop）。
+     * 不走防抖，直接保存当前状态。
+     */
+    private fun handleForceSave() {
+        autoSaveJob?.cancel()
+        val s = _state.value
+        if (s.text.isBlank() && s.selectedImages.isEmpty()) return // 空内容不保存
+        viewModelScope.launch {
+            draftManager.saveDraft(s.text, s.selectedImages, s.formatSpanDescriptors)
+        }
+        Log.d(tag, "💾 [ViewModel] 强制保存草稿完成")
+    }
+
+    /**
+     * 防抖自动保存：取消旧任务 → delay → 写入草稿文件。
+     *
+     * 设计要点：
+     *   - 打字过程每键都触发 scheduleAutoSave，但只有最后一次 delay 到期的才会真正写入。
+     *   - 图片变更同理，每次增删拖都 schedule，最终只写一次。
+     *   - 空内容不保存（避免空白草稿文件残留）。
+     */
+    private fun scheduleAutoSave() {
+        val s = _state.value
+        if (s.text.isBlank() && s.selectedImages.isEmpty()) return
+
+        autoSaveJob?.cancel()
+        autoSaveJob = viewModelScope.launch {
+            delay(AUTO_SAVE_DEBOUNCE_MS)
+            draftManager.saveDraft(s.text, s.selectedImages, s.formatSpanDescriptors)
+            Log.d(tag, "💾 [ViewModel] auto-save done: text=${s.text.length}chars, images=${s.selectedImages.size}")
+        }
+    }
+
+    // ========================================================================
+    // Lifecycle-aware：Activity onStop 时强制保存（由 View 层调用）
+    // ========================================================================
+
+    /**
+     * 供 Activity.onStop() 调用，确保 App 切后台前草稿已落盘。
+     * 与 handleForceSave 等价，但作为公开 API 暴露给 View 层。
+     */
+    fun onActivityStop() {
+        handleForceSave()
     }
 }

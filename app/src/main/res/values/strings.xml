@@ -27,4 +27,11 @@
     <string name="wtt_success_images_fmt">共 %1$d 张图片</string>
     <string name="wtt_success_text_empty">（纯图片分享）</string>
     <string name="wtt_success_images_empty">（纯文字分享）</string>
+
+    <!-- Day 20+: 草稿自动保存 -->
+    <string name="wtt_draft_found_title">发现草稿</string>
+    <!-- %1$s = DraftMeta.toPreviewText(), %2$s = DraftMeta.toRelativeTime() -->
+    <string name="wtt_draft_found_summary">%1$s\n上次保存：%2$s</string>
+    <string name="wtt_draft_btn_restore">恢复</string>
+    <string name="wtt_draft_btn_discard">放弃</string>
 </resources>
