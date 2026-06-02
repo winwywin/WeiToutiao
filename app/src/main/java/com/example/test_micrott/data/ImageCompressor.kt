@@ -1,4 +1,4 @@
-package com.example.test_micrott.util
+package com.example.test_micrott.data
 
 import android.content.ContentResolver
 import android.content.Context

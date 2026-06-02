@@ -23,6 +23,9 @@
 | Day 8+9 (新) | ImageCompressor + ThumbnailCache + ViewPager2 大图预览 |
 | perf | GalleryPickerAdapter 协程线程池 / 单次fd解码 / 精准缓存清理 |
 | Day 17 | 分步发布：压缩→上传→完成，水平进度条 |
+| Day 18-21 | 字数统计 + 发布成功页 + 草稿自动保存(JSON) + 话题选择器 + 手动按钮 |
+| Day 22 | 草稿重构：SQLite 单表多草稿 + DraftListActivity 草稿箱列表页 |
+| Day 22+ | 双层草稿：主动保存(退出弹窗确认) + 防抖保存(onPause临时→onResume删/onStop永久) |
 
 ## 架构约定
 - MVI 单向数据流：View → PublishIntent → PublishViewModel → PublishState → View
@@ -36,6 +39,23 @@
 - GalleryPickerAdapter.submitList 仍用 notifyDataSetChanged（可升级为 DiffUtil）
 - 上传模拟 delay(600ms/张)，如需更真实可换 OkHttp 上传 + FileRequestBody
 - cacheDir/compress/ 仅在发布完成时清理，异常中断不清理（可在 onCleared 里补）
+
+## Day 17b：图片预览点击 + 选择顺序修复
+- Bug1：ImageGridAdapter 中 lambda 捕获的 `position` 在拖拽排序后变陈旧 → 改用 `holder.adapterPosition` 实时获取
+- Bug2：GalleryPickerActivity.confirmSelection() 按 DATE_MODIFIED DESC 收集 URI → 新增 `selectedOrder` 列表，按用户点击先后顺序返回
+
+## 草稿功能 (Day 22+)
+- SQLite 单表: drafts(id, text, images_json, spans_json, saved_at, is_temporary)
+- **双层草稿机制**：
+  - 主动保存：退出弹窗点「保存」→ is_temporary=0（永久草稿）
+  - 防抖保存：onPause → is_temporary=1（临时草稿）
+    - onResume → 全部删除（用户回来了，数据没丢）
+    - onStop → 全部升级为永久（用户真走了）
+- 内部 Activity 跳转（草稿箱/预览/相册）通过 `launchingInternalActivity` 标记防止误升级
+- DraftListActivity 草稿箱列表页：点击恢复 / 管理模式删除（仅显示永久草稿）
+- 标题栏按钮三态：空白→草稿箱 / 触碰编辑器→灰色发布 / 有内容→红色发布
+- PublishState.isEditorTouched 控制按钮切换
+- PublishIntent: ConfirmSaveAndExit / ConfirmDiscardAndExit（退出弹窗确认）
 
 ## 关键文件路径
 - `app/src/main/java/com/example/test_micrott/`

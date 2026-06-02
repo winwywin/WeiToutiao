@@ -1,4 +1,4 @@
-package com.example.test_micrott.view
+package com.example.test_micrott.views
 
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
@@ -9,8 +9,8 @@ import android.widget.ImageView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.example.test_micrott.R
-import com.example.test_micrott.util.ImageCompressor
-import com.example.test_micrott.util.ThumbnailCache
+import com.example.test_micrott.data.ImageCompressor
+import com.example.test_micrott.data.ThumbnailCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -204,8 +204,14 @@ class ImageGridAdapter(
             }
         }
 
-        holder.btnDelete.setOnClickListener { mDeleteListener?.invoke(position) }
-        holder.imageView.setOnClickListener { mOnImageClickListener?.invoke(position) }
+        holder.btnDelete.setOnClickListener {
+            val pos = holder.adapterPosition
+            if (pos != RecyclerView.NO_POSITION) mDeleteListener?.invoke(pos)
+        }
+        holder.imageView.setOnClickListener {
+            val pos = holder.adapterPosition
+            if (pos != RecyclerView.NO_POSITION) mOnImageClickListener?.invoke(pos)
+        }
     }
 
     override fun onViewRecycled(holder: RecyclerView.ViewHolder) {

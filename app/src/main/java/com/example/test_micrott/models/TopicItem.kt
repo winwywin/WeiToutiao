@@ -1,4 +1,4 @@
-package com.example.test_micrott.model
+package com.example.test_micrott.models
 
 /**
  * 热门话题条目。

@@ -1,4 +1,4 @@
-package com.example.test_micrott.model
+package com.example.test_micrott.models
 
 /**
  * 格式化 Span 描述符 — 用于旋转持久化。

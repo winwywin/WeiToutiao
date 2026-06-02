@@ -1,4 +1,4 @@
-package com.example.test_micrott.view
+﻿package com.example.test_micrott.views
 
 import android.content.ContentUris
 import android.net.Uri
@@ -50,6 +50,9 @@ class GalleryPickerActivity : AppCompatActivity() {
 
     // 全部照片列表
     private val allPhotos = mutableListOf<GalleryPhoto>()
+
+    /** 用户点击选中/取消的 mediaId 顺序。用于确认时按点击顺序返回 URI。 */
+    private val selectedOrder = mutableListOf<Long>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val t0 = System.currentTimeMillis()
@@ -120,6 +123,9 @@ class GalleryPickerActivity : AppCompatActivity() {
             // ── 阶段2：提交到 Adapter ──
             allPhotos.clear()
             allPhotos.addAll(photos)
+            // 预选照片排在选中顺序最前面（来自上一轮选择）
+            selectedOrder.clear()
+            selectedOrder.addAll(preselectedSet)
             val tSubmitStart = System.currentTimeMillis()
             adapter.submitList(photos)
             val tSubmitEnd = System.currentTimeMillis()
@@ -203,6 +209,7 @@ class GalleryPickerActivity : AppCompatActivity() {
         if (photo.isSelected) {
             // 取消选中
             photo.isSelected = false
+            selectedOrder.remove(photo.mediaId)
             adapter.notifyItemChanged(position)
         } else {
             // 检查上限：已选数量 < maxSelectable + 预选数量（= 总共最多 MAX_TOTAL 张）
@@ -212,6 +219,7 @@ class GalleryPickerActivity : AppCompatActivity() {
                 return
             }
             photo.isSelected = true
+            selectedOrder.add(photo.mediaId)
             adapter.notifyItemChanged(position)
         }
         updateConfirmButton()
@@ -227,9 +235,10 @@ class GalleryPickerActivity : AppCompatActivity() {
     // ========================================================================
 
     private fun confirmSelection() {
-        val selectedUris = allPhotos
-            .filter { it.isSelected }
-            .map { photo -> photo.uri }
+        // 按用户点击顺序收集 URI（而非 MediaStore DATE_MODIFIED 顺序）
+        val uriMap = allPhotos.associate { it.mediaId to it.uri }
+        val selectedUris = selectedOrder
+            .mapNotNull { mediaId -> uriMap[mediaId] }
 
         Log.d(tag, "用户确认选择 ${selectedUris.size} 张")
         val data = intent.apply {

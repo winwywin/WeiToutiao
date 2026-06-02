@@ -1,4 +1,4 @@
-package com.example.test_micrott.util
+package com.example.test_micrott.data
 
 import android.graphics.Bitmap
 import android.util.LruCache

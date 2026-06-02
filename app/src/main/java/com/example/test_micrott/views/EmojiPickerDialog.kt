@@ -1,4 +1,4 @@
-package com.example.test_micrott.view
+package com.example.test_micrott.views
 
 import android.os.Bundle
 import android.view.LayoutInflater

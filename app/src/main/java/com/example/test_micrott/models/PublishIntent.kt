@@ -1,4 +1,4 @@
-package com.example.test_micrott.model
+package com.example.test_micrott.models
 
 import android.net.Uri
 
@@ -39,28 +39,27 @@ sealed class PublishIntent {
     // 9. 用户关闭发布成功页，回到编辑模式
     object DismissSuccess : PublishIntent()
 
-    // 10. ViewModel 初始化时检测到草稿，带元信息通知 View 层
-    data class DraftDetected(
-        val textLength: Int,
-        val imageCount: Int,
-        val savedAt: Long
-    ) : PublishIntent()
+    // 10. View 层通知 ViewModel：编辑器已被用户触碰（选图、点输入框），切换标题栏按钮
+    object EditorTouched : PublishIntent()
 
-    // 11. 用户在弹框中点击"恢复"，加载草稿到编辑器
-    object RestoreDraft : PublishIntent()
+    // 11. 用户点击标题栏"草稿箱"按钮 → View 层跳 DraftListActivity
+    object OpenDraftBox : PublishIntent()
 
-    // 12. 用户在弹框中点击"放弃"，清除草稿
-    object DismissDraft : PublishIntent()
+    // 12. 从草稿箱返回，恢复指定草稿到编辑器
+    data class RestoreDraft(val id: Long) : PublishIntent()
 
-    // 13. 强制触发一次保存（App 进入后台 / onPause 场景）
-    object ForceSave : PublishIntent()
+    // 13. 退出弹窗：用户确认保存草稿并退出
+    object ConfirmSaveAndExit : PublishIntent()
 
-    // 14. 用户点击底部工具栏"# 话题"按钮，弹出话题选择器
+    // 14. 退出弹窗：用户确认不保存直接退出
+    object ConfirmDiscardAndExit : PublishIntent()
+
+    // 15. 用户点击底部工具栏"# 话题"按钮，弹出话题选择器
     object ShowTopicPicker : PublishIntent()
 
-    // 15. 用户关闭话题选择器
+    // 16. 用户关闭话题选择器
     object HideTopicPicker : PublishIntent()
 
-    // 16. 用户在话题选择器中点击某个话题（携带完整话题名，不含 # 包裹）
+    // 17. 用户在话题选择器中点击某个话题（携带完整话题名，不含 # 包裹）
     data class SelectTopic(val topicName: String) : PublishIntent()
 }

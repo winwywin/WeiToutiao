@@ -44,13 +44,30 @@
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintTop_toTopOf="parent" />
 
+            <!-- 草稿箱按钮（空白且未触碰时显示） -->
+            <TextView
+                android:id="@+id/btn_draft_box"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="4dp"
+                android:layout_marginEnd="@dimen/wtt_spacing_standard"
+                android:text="@string/wtt_btn_draft_box"
+                android:textSize="14sp"
+                android:textColor="#333333"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
+
+            <!-- 发布按钮（有内容或触碰编辑器后显示） -->
             <Button
                 android:id="@+id/btn_publish"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="@dimen/wtt_spacing_standard"
                 android:text="@string/wtt_btn_publish"
                 android:enabled="false"
+                android:visibility="gone"
+                android:layout_marginEnd="@dimen/wtt_spacing_standard"
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintTop_toTopOf="parent" />

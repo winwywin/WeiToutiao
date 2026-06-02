@@ -1,4 +1,4 @@
-package com.example.test_micrott.view
+package com.example.test_micrott.views
 
 import android.net.Uri
 import android.os.Bundle

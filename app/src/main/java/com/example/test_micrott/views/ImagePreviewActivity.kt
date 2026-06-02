@@ -1,4 +1,4 @@
-package com.example.test_micrott.view
+package com.example.test_micrott.views
 
 import android.net.Uri
 import android.os.Bundle
@@ -11,8 +11,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.example.test_micrott.R
-import com.example.test_micrott.util.ImageCompressor
-import com.example.test_micrott.util.ThumbnailCache
+import com.example.test_micrott.data.ImageCompressor
+import com.example.test_micrott.data.ThumbnailCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

@@ -1,4 +1,4 @@
-package com.example.test_micrott.model
+package com.example.test_micrott.models
 
 import android.net.Uri
 
@@ -50,12 +50,8 @@ data class PublishState(
     val publishSuccess: Boolean = false,
     val publishResultText: String = "",
     val publishResultImageCount: Int = 0,
-    // Day 20+：草稿自动保存
-    val hasDraft: Boolean = false,
-    val showDraftPrompt: Boolean = false,  // 弹框展示标记（只展示一次）
-    val draftSavedAt: Long = 0L,
-    val draftTextLength: Int = 0,
-    val draftImageCount: Int = 0,
+    // Day 22+：编辑器是否已被"触碰"过（选图/点输入框），用于按钮状态切换
+    val isEditorTouched: Boolean = false,
     // Day 21+：话题选择器
     val hotTopics: List<TopicItem> = TopicItem.DEFAULT_HOT_TOPICS,
     val showTopicPicker: Boolean = false,

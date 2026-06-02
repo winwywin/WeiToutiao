@@ -1,4 +1,4 @@
-package com.example.test_micrott.view
+package com.example.test_micrott.views
 
 // ==========================================
 // 1. Android 系统与 Jetpack 官方核心依赖库导入区
@@ -29,6 +29,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
@@ -47,11 +48,11 @@ import kotlinx.coroutines.launch
 // ==========================================
 import com.example.test_micrott.R
 import com.example.test_micrott.databinding.ActivityMainBinding
-import com.example.test_micrott.model.PublishIntent
-import com.example.test_micrott.model.PublishState
-import com.example.test_micrott.model.SpanDescriptor
-import com.example.test_micrott.model.SpanType
-import com.example.test_micrott.model.TopicItem
+import com.example.test_micrott.models.PublishIntent
+import com.example.test_micrott.models.PublishState
+import com.example.test_micrott.models.SpanDescriptor
+import com.example.test_micrott.models.SpanType
+import com.example.test_micrott.models.TopicItem
 import com.example.test_micrott.viewmodels.PublishViewModel
 
 /**
@@ -94,6 +95,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Day 22+：草稿箱列表页 — 返回时恢复选中草稿
+    private val draftListLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val draftId = result.data?.getLongExtra(
+                DraftListActivity.EXTRA_RESTORED_DRAFT_ID, -1L
+            ) ?: -1L
+            if (draftId > 0) {
+                Log.d(tag, "📋 [View] 草稿箱返回，恢复草稿 id=$draftId")
+                viewModel.sendIntent(PublishIntent.RestoreDraft(draftId))
+            }
+        }
+    }
+
     // Day 14：运行时权限请求（读照片权限）
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -126,6 +142,7 @@ class MainActivity : AppCompatActivity() {
         observeUiState()
         setupTopicTokenGuard()
         initFormattingToolbar()   // Day 16: 富文本格式化工具栏
+        setupBackPressedDispatcher()  // Day 22++: 返回键拦截改用 OnBackPressedDispatcher
     }
 
     // ========================================================================
@@ -251,6 +268,7 @@ class MainActivity : AppCompatActivity() {
         }
         val preSelectedIds = extractMediaIds(currentImages)
         Log.d(tag, "📷 [View] 启动自定义相册，剩余名额 $maxSlots，已选 ${preSelectedIds.size} 张")
+        viewModel.notifyInternalActivityLaunch()
         pickMultipleMedia.launch(PickConfig(maxSelectable = maxSlots, preSelectedIds = preSelectedIds))
     }
 
@@ -286,6 +304,7 @@ class MainActivity : AppCompatActivity() {
         val uriStrings = ArrayList<String>(uris.size)
         uris.forEach { uriStrings.add(it.toString()) }
 
+        viewModel.notifyInternalActivityLaunch()
         val intent = Intent(this, ImagePreviewActivity::class.java).apply {
             putStringArrayListExtra(ImagePreviewActivity.EXTRA_URI_LIST, uriStrings)
             putExtra(ImagePreviewActivity.EXTRA_POSITION, safePos)
@@ -303,13 +322,26 @@ class MainActivity : AppCompatActivity() {
             viewModel.sendIntent(PublishIntent.TextChanged(text.toString()))
         }
 
+        // Day 22+：EditText 获得焦点 → 编辑器被触碰，切换按钮状态
+        binding.ktg.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) {
+                viewModel.sendIntent(PublishIntent.EditorTouched)
+            }
+        }
+
         binding.btnPublish.setOnClickListener {
             viewModel.sendIntent(PublishIntent.ClickPublish)
         }
 
-        // Day 9 新增：左上角"取消"按钮
+        // Day 9 新增：左上角"取消"按钮 → 弹出退出确认框
         binding.btnBack.setOnClickListener {
-            finish()
+            showExitConfirmDialog()
+        }
+
+        binding.btnDraftBox.setOnClickListener {
+            viewModel.notifyInternalActivityLaunch()
+            val intent = Intent(this, DraftListActivity::class.java)
+            draftListLauncher.launch(intent)
         }
 
         binding.barTopic.setOnClickListener {
@@ -369,17 +401,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ================================================================
-        // 0b. 草稿恢复弹框（次高优先级，仅弹一次）
+        // 0b. 草稿恢复弹框（已移除 — 改用草稿箱列表页 DraftListActivity）
         // ================================================================
-        if (state.showDraftPrompt && state.hasDraft) {
-            showDraftRestoreDialog(state.draftTextLength, state.draftImageCount, state.draftSavedAt)
-            viewModel.sendIntent(PublishIntent.DraftDetected(
-                textLength = state.draftTextLength,
-                imageCount = state.draftImageCount,
-                savedAt = state.draftSavedAt,
-            ))
-            return
-        }
 
         // ================================================================
         // 0c. 话题选择器 BottomSheet（状态驱动）
@@ -400,12 +423,12 @@ class MainActivity : AppCompatActivity() {
             // 使用 getString() + UploadStatus 结构体渲染本地化文字，
             // 避免直接拼接字符串（符合「Use resource strings with placeholders」要求）
             binding.tvUploadStatus.text = when (val status = state.uploadStatus) {
-                is com.example.test_micrott.model.UploadStatus.Compressing ->
+                is com.example.test_micrott.models.UploadStatus.Compressing ->
                     getString(R.string.wtt_upload_compress, status.current, status.total)
-                is com.example.test_micrott.model.UploadStatus.Uploading ->
+                is com.example.test_micrott.models.UploadStatus.Uploading ->
                     getString(R.string.wtt_upload_send, status.current, status.total)
-                is com.example.test_micrott.model.UploadStatus.Publishing,
-                is com.example.test_micrott.model.UploadStatus.Preparing ->
+                is com.example.test_micrott.models.UploadStatus.Publishing,
+                is com.example.test_micrott.models.UploadStatus.Preparing ->
                     getString(R.string.wtt_status_publishing)
                 else -> getString(R.string.wtt_status_publishing)
             }
@@ -418,6 +441,7 @@ class MainActivity : AppCompatActivity() {
         // ================================================================
         binding.ktg.isEnabled = !loading
         binding.btnPublish.isEnabled = state.isPublishButtonEnabled && !loading
+        binding.btnDraftBox.isEnabled = !loading
         binding.barTopic.isEnabled = !loading
         binding.barMention.isEnabled = !loading
         binding.barEmoji.isEnabled = !loading
@@ -429,7 +453,21 @@ class MainActivity : AppCompatActivity() {
         binding.barPhoto.isEnabled = !loading && !isFull
 
         // ================================================================
-        // 3. 发布按钮颜色
+        // 3. 发布按钮/草稿箱按钮可见性（三态切换）
+        // ================================================================
+        val hasContent = state.text.trim().isNotEmpty() || state.selectedImages.isNotEmpty()
+        if (state.isEditorTouched || hasContent) {
+            // 状态 2/3：显示发布按钮，隐藏草稿箱
+            binding.btnPublish.visibility = View.VISIBLE
+            binding.btnDraftBox.visibility = View.GONE
+        } else {
+            // 状态 1：显示草稿箱，隐藏发布按钮
+            binding.btnPublish.visibility = View.GONE
+            binding.btnDraftBox.visibility = View.VISIBLE
+        }
+
+        // ================================================================
+        // 4. 发布按钮颜色
         // ================================================================
         binding.btnPublish.setBackgroundColor(
             if (state.isPublishButtonEnabled && !loading) "#F85149".toColorInt()
@@ -437,12 +475,12 @@ class MainActivity : AppCompatActivity() {
         )
 
         // ================================================================
-        // 4. 底部照片按钮 alpha（满 9 张或 loading 时变灰）
+        // 5. 底部照片按钮 alpha（满 9 张或 loading 时变灰）
         // ================================================================
         binding.barPhoto.alpha = if (isFull || loading) 0.35f else 1.0f
 
         // ================================================================
-        // 5. 输入框文本：仅在外部变更（SavedState 恢复 / 发布重置）时回写
+        // 6. 输入框文本：仅在外部变更（SavedState 恢复 / 发布重置）时回写
         //    正常打字时 EditText.text == state.text，此分支不触发，避免光标跳动
         // ================================================================
         if (binding.ktg.text.toString() != state.text) {
@@ -455,7 +493,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ================================================================
-        // 5b. 字数统计显示
+        // 6b. 字数统计显示
         // ================================================================
         binding.tvCharCount.text = getString(
             R.string.wtt_char_count_format,
@@ -469,7 +507,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ================================================================
-        // 6. 九宫格：仅图片列表内容变化时才 updateData，避免每帧打字触发
+        // 7. 九宫格：仅图片列表内容变化时才 updateData，避免每帧打字触发
         //    notifyDataSetChanged，以及拖拽松手后 ViewModel 回写相同顺序
         //    导致 notifyDataSetChanged 打断 ItemTouchHelper 松手动画。
         //    用内容比较（==）而非引用比较（===）。
@@ -540,57 +578,72 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ========================================================================
-    // Day 20+：草稿恢复弹框
+    // Day 22+：草稿恢复 — 已移至 DraftListActivity
     // ========================================================================
 
-    /**
-     * 展示草稿恢复确认弹框。
-     * 参照今日头条 WTT 草稿恢复 UI：标题"发现草稿"、摘要、恢复/放弃按钮。
-     *
-     * @param textLength  草稿文本字数
-     * @param imageCount  草稿图片数量
-     * @param savedAt     最后保存时间戳
-     */
-    private fun showDraftRestoreDialog(textLength: Int, imageCount: Int, savedAt: Long) {
-        val meta = com.example.test_micrott.util.DraftMeta(
-            textLength = textLength,
-            imageCount = imageCount,
-            savedAt = savedAt,
-        )
-        val summary = getString(
-            R.string.wtt_draft_found_summary,
-            meta.toPreviewText(),
-            meta.toRelativeTime()
-        )
+    // ========================================================================
+    // Day 22+：生命周期回调 — 双层草稿机制
+    // ========================================================================
 
-        AlertDialog.Builder(this)
-            .setTitle(R.string.wtt_draft_found_title)
-            .setMessage(summary)
-            .setPositiveButton(R.string.wtt_draft_btn_restore) { _, _ ->
-                Log.d(tag, "📋 [View] 用户选择恢复草稿")
-                viewModel.sendIntent(PublishIntent.RestoreDraft)
-            }
-            .setNegativeButton(R.string.wtt_draft_btn_discard) { _, _ ->
-                Log.d(tag, "🗑️ [View] 用户放弃草稿")
-                viewModel.sendIntent(PublishIntent.DismissDraft)
-            }
-            .setCancelable(false) // 必须明确选择，不能点外部关闭
-            .show()
-
-        Log.d(tag, "📋 [View] 草稿恢复弹框已展示")
+    override fun onPause() {
+        super.onPause()
+        viewModel.onActivityPause()
     }
 
-    // ========================================================================
-    // Day 20+：生命周期回调 — App 切后台时强制保存草稿
-    // ========================================================================
+    override fun onResume() {
+        super.onResume()
+        viewModel.onActivityResume()
+    }
 
     override fun onStop() {
         super.onStop()
-        // 发布成功页不保存草稿（已发布的内容不需要草稿）
-        if (!viewModel.state.value.publishSuccess) {
-            viewModel.onActivityStop()
-            Log.d(tag, "💾 [View] onStop → 强制保存草稿")
+        viewModel.onActivityStop()
+    }
+
+    /**
+     * 系统返回键/手势 → 弹出退出确认框（有内容时）。
+     * 迁移到 AndroidX OnBackPressedDispatcher，替代已废弃的 onBackPressed()。
+     */
+    private fun setupBackPressedDispatcher() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (viewModel.hasContent()) {
+                    showExitConfirmDialog()
+                } else {
+                    // 无内容 → 释放拦截，走系统默认返回
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+    }
+
+    /**
+     * 退出确认弹窗：「保存」「不保存」「取消」三选一。
+     *
+     * - 保存：通知 ViewModel 存永久草稿 → finish()
+     * - 不保存：通知 ViewModel 跳过防抖 → finish()
+     * - 取消：关闭弹窗，留在当前页面
+     */
+    private fun showExitConfirmDialog() {
+        if (!viewModel.hasContent()) {
+            finish()
+            return
         }
+
+        AlertDialog.Builder(this)
+            .setTitle("是否保存草稿？")
+            .setMessage("当前内容尚未发布，是否保存为草稿？")
+            .setPositiveButton("保存") { _, _ ->
+                viewModel.sendIntent(PublishIntent.ConfirmSaveAndExit)
+                finish()
+            }
+            .setNegativeButton("不保存") { _, _ ->
+                viewModel.sendIntent(PublishIntent.ConfirmDiscardAndExit)
+                finish()
+            }
+            .setNeutralButton("取消", null)
+            .show()
     }
 
     // ========================================================================
@@ -991,14 +1044,13 @@ class MainActivity : AppCompatActivity() {
     /**
      * 初始化格式化工具栏：绑定 B/I/A 按钮 + 显示/隐藏逻辑。
      */
+    @SuppressLint("ClickableViewAccessibility")
     private fun initFormattingToolbar() {
         binding.barBold.setOnClickListener { toggleBold() }
         binding.barItalic.setOnClickListener { toggleItalic() }
         binding.barColor.setOnClickListener { showColorPicker() }
 
         // 触摸 EditText 时更新按钮状态（光标位置变化）
-        // @SuppressLint: performClick() 已在 ACTION_UP 中显式调用，满足可访问性要求
-        @SuppressLint("ClickableViewAccessibility")
         val touchListener = View.OnTouchListener { view, event ->
             if (event.action == MotionEvent.ACTION_UP) {
                 updateFormattingButtonStates(
@@ -1092,12 +1144,6 @@ class MainActivity : AppCompatActivity() {
         binding.barColor.setTextColor(
             activeColor ?: "#555555".toColorInt()
         )
-    }
-
-    private fun resetFormattingButtonStates() {
-        binding.barBold.setTextColor("#555555".toColorInt())
-        binding.barItalic.setTextColor("#555555".toColorInt())
-        binding.barColor.setTextColor("#555555".toColorInt())
     }
 
     /**
