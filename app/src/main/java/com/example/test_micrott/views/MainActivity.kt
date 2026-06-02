@@ -21,7 +21,6 @@ import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.util.Log
 import android.view.Gravity
-import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -37,9 +36,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.toColorInt
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.GridLayoutManager
-import androidx.recyclerview.widget.ItemTouchHelper
-import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.RecyclerView  // ImageGridAdapter 内部仍需引用
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import kotlinx.coroutines.launch
 
@@ -67,6 +64,9 @@ class MainActivity : AppCompatActivity() {
     private val viewModel: PublishViewModel by viewModels()
     private val tag = "MVI_FRAMEWORK"
 
+    // A9 自定义九宫格 ViewGroup（替换 RecyclerView + ImageGridAdapter + GridLayoutManager）
+    private lateinit var nineGridLayout: NineGridLayout
+    // 保留 adapter 用于拖拽排序兼容（ItemTouchHelper 仍附着在 RecyclerView 上）
     private lateinit var imageGridAdapter: ImageGridAdapter
 
     // Day 8 新增：缓存上次图片列表引用，避免每帧打字触发 notifyDataSetChanged
@@ -82,6 +82,9 @@ class MainActivity : AppCompatActivity() {
 
     // 防止 TextWatcher 在程序化文本变更时误触发待定格式应用
     private var isProgrammaticChange = false
+
+    // A9 SpanWatcher：#话题# / @提及 块删除守卫
+    private lateinit var spanWatcher: SpanWatcher
 
     // Day 11 升级：自定义相册选择器，支持已选照片跨会话勾选标记
     private val pickMultipleMedia = registerForActivityResult(
@@ -140,7 +143,7 @@ class MainActivity : AppCompatActivity() {
         initDragSupport()         // Day 7: 拖拽排序
         initIntentEmitters()
         observeUiState()
-        setupTopicTokenGuard()
+        setupTopicTokenGuard()     // A9：内部实际调用 SpanWatcher.attach()
         initFormattingToolbar()   // Day 16: 富文本格式化工具栏
         setupBackPressedDispatcher()  // Day 22++: 返回键拦截改用 OnBackPressedDispatcher
     }
@@ -150,98 +153,67 @@ class MainActivity : AppCompatActivity() {
     // ========================================================================
 
     private fun initRecyclerView() {
-        binding.gridImageContainer.layoutManager = GridLayoutManager(this, 3)
+        // A9：使用自定义 NineGridLayout 替代 RecyclerView + GridLayoutManager(3)
+        nineGridLayout = findViewById(R.id.grid_image_container)
+        nineGridLayout.scope = lifecycleScope
+        nineGridLayout.onAddClick = { tryPickPhotos() }
+        nineGridLayout.onDeleteClick = { index -> viewModel.sendIntent(PublishIntent.RemoveImage(index)) }
+        nineGridLayout.onImageClick = { index -> launchImagePreview(index) }
+
+        // 兼容层：保留 ImageGridAdapter 用于拖拽排序坐标映射
         imageGridAdapter = ImageGridAdapter(lifecycleScope)
         imageGridAdapter.setListeners(
-            onAddClickListener = {
-                tryPickPhotos()
-            },
-            onDeleteClickListener = { position ->
-                viewModel.sendIntent(PublishIntent.RemoveImage(position))
-            },
-            onMoveListener = { from, to ->
-                viewModel.sendIntent(PublishIntent.MoveImage(from, to))
-            },
-            onImageClickListener = { position ->
-                launchImagePreview(position)
-            }
+            onAddClickListener = { tryPickPhotos() },
+            onDeleteClickListener = { index -> viewModel.sendIntent(PublishIntent.RemoveImage(index)) },
+            onMoveListener = { from, to -> viewModel.sendIntent(PublishIntent.MoveImage(from, to)) },
+            onImageClickListener = { index -> launchImagePreview(index) }
         )
-        binding.gridImageContainer.adapter = imageGridAdapter
     }
 
-    /**
-     * Day 11 → Day 31 重构：实时占位预览式拖拽排序
-     *
-     * 旧行为（Day 11）：onMove 返回 false，松手后一次性计算目标位置并交换。
-     * 新行为：拖动过程中 onMove 返回 true + notifyItemMoved，
-     *        其他图片实时让出空位（类似手机桌面图标拖动），
-     *        但只有松手才提交最终顺序到 ViewModel。
-     *
-     * 实现：onMove → previewOnItemMove（仅本地交换 + 动画，不通知 VM）
-     *       clearView → 收集最终顺序 → ReorderImages 通知 VM
-     */
-    private var dragStartPosition = RecyclerView.NO_POSITION
+    // ── A9：NineGridLayout 拖拽排序（基础版，无实时预览动画）──
+
+    private var dragStartIndex = -1
+    private var dragStartX = 0f
+    private var dragStartY = 0f
 
     private fun initDragSupport() {
-        val callback = object : ItemTouchHelper.SimpleCallback(
-            ItemTouchHelper.UP or ItemTouchHelper.DOWN or
-                    ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT,
-            0  // 不处理滑动删除
-        ) {
-            override fun onMove(
-                recyclerView: RecyclerView,
-                viewHolder: RecyclerView.ViewHolder,
-                target: RecyclerView.ViewHolder
-            ): Boolean {
-                // 加号格子不允许拖入
-                if (viewHolder is ImageGridAdapter.AddViewHolder ||
-                    target is ImageGridAdapter.AddViewHolder) {
-                    return false
+        nineGridLayout.setOnTouchListener { v, event ->
+            if (nineGridLayout.getImages().isEmpty()) return@setOnTouchListener false
+
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    val idx = nineGridLayout.indexAtPoint(event.x, event.y)
+                    // 只拖拽图片格（最后一个是加号按钮）
+                    if (idx >= 0 && idx < nineGridLayout.getImages().size) {
+                        dragStartIndex = idx
+                        dragStartX = event.rawX
+                        dragStartY = event.rawY
+                    }
+                    false
                 }
-                // Day 31：实时预览换位，仅本地交换 + 动画，不通知 ViewModel
-                val from = viewHolder.adapterPosition
-                val to = target.adapterPosition
-                imageGridAdapter.previewOnItemMove(from, to)
-                return true
-            }
-
-            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
-                // 不使用滑动删除
-            }
-
-            override fun isLongPressDragEnabled(): Boolean = true
-
-            override fun onSelectedChanged(
-                viewHolder: RecyclerView.ViewHolder?,
-                actionState: Int
-            ) {
-                super.onSelectedChanged(viewHolder, actionState)
-                if (actionState == ItemTouchHelper.ACTION_STATE_DRAG) {
-                    dragStartPosition = viewHolder?.adapterPosition
-                        ?: RecyclerView.NO_POSITION
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    if (dragStartIndex < 0) return@setOnTouchListener false
+                    val dx = event.rawX - dragStartX
+                    val dy = event.rawY - dragStartY
+                    val absDx = Math.abs(dx); val absDy = Math.abs(dy)
+                    // 不做实时动画，只记录
+                    false
                 }
-            }
-
-            override fun clearView(
-                recyclerView: RecyclerView,
-                viewHolder: RecyclerView.ViewHolder
-            ) {
-                super.clearView(recyclerView, viewHolder)
-
-                val from = dragStartPosition
-                dragStartPosition = RecyclerView.NO_POSITION
-                if (from == RecyclerView.NO_POSITION) return
-
-                // Day 31 修复：拖拽过程中已在本地完成所有交换（previewOnItemMove），
-                // adapter 的数据顺序就是最终顺序。松手时：
-                //   1. 先同步 lastImageList，让 render() 跳过 updateData（防止 notifyDataSetChanged 打断动画）
-                //   2. 再通知 ViewModel 更新，保持状态一致
-                val finalOrder = ArrayList(imageGridAdapter.getImages())
-                lastImageList = finalOrder          // ← 防止 render() 回调覆盖 adapter 的正确顺序
-                viewModel.sendIntent(PublishIntent.ReorderImages(finalOrder))
+                android.view.MotionEvent.ACTION_UP -> {
+                    if (dragStartIndex < 0) return@setOnTouchListener false
+                    val targetIdx = nineGridLayout.indexAtPoint(event.x, event.y)
+                    if (targetIdx >= 0 && targetIdx < nineGridLayout.getImages().size
+                        && targetIdx != dragStartIndex) {
+                        nineGridLayout.commitSwap(dragStartIndex, targetIdx) { from, to ->
+                            viewModel.sendIntent(PublishIntent.MoveImage(from, to))
+                        }
+                    }
+                    dragStartIndex = -1
+                    false
+                }
+                else -> false
             }
         }
-        ItemTouchHelper(callback).attachToRecyclerView(binding.gridImageContainer)
     }
 
     /**
@@ -260,7 +232,7 @@ class MainActivity : AppCompatActivity() {
 
     /** 权限已授予后，真正启动 GalleryPickerActivity */
     private fun launchGalleryPicker() {
-        val currentImages = imageGridAdapter.getImages()
+        val currentImages = nineGridLayout.getImages()
         val maxSlots = 9 - currentImages.size
         if (maxSlots <= 0) {
             Log.d(tag, "📷 [View] 已达 9 张上限，阻止相册启动")
@@ -297,7 +269,7 @@ class MainActivity : AppCompatActivity() {
      * Day 9: 从九宫格点击图片 → 启动全屏预览
      */
     private fun launchImagePreview(position: Int) {
-        val uris = imageGridAdapter.getImages()
+        val uris = nineGridLayout.getImages()
         if (uris.isEmpty()) return
         val safePos = position.coerceIn(0, uris.size - 1)
 
@@ -513,7 +485,7 @@ class MainActivity : AppCompatActivity() {
         //    用内容比较（==）而非引用比较（===）。
         // ================================================================
         if (state.selectedImages != lastImageList) {
-            imageGridAdapter.updateData(state.selectedImages)
+            nineGridLayout.setImages(state.selectedImages, maxCount = 9)
             lastImageList = state.selectedImages
         }
     }
@@ -972,69 +944,7 @@ class MainActivity : AppCompatActivity() {
     // ========================================================================
 
     private fun setupTopicTokenGuard() {
-        binding.ktg.setOnKeyListener { _, keyCode, event ->
-            if (keyCode == KeyEvent.KEYCODE_DEL && event.action == KeyEvent.ACTION_DOWN) {
-                val start = binding.ktg.selectionStart
-                val end = binding.ktg.selectionEnd
-                if (start == end) {
-                    val editable = binding.ktg.text
-                    val spans = editable.getSpans(start, start, ForegroundColorSpan::class.java)
-                    for (span in spans) {
-                        val spanEnd = editable.getSpanEnd(span)
-                        if (start == spanEnd) {
-                            editable.delete(editable.getSpanStart(span), spanEnd)
-                            return@setOnKeyListener true
-                        }
-                    }
-                }
-            }
-            false
-        }
-
-        binding.ktg.setOnClickListener {
-            val position = binding.ktg.selectionStart
-            val editable = binding.ktg.text ?: return@setOnClickListener
-            val spans = editable.getSpans(position, position, ForegroundColorSpan::class.java)
-            for (span in spans) {
-                val start = editable.getSpanStart(span)
-                val end = editable.getSpanEnd(span)
-                if (position in (start + 1)..<end) {
-                    binding.ktg.setSelection(if (position < (start + end) / 2) start else end)
-                    break
-                }
-            }
-        }
-
-        binding.ktg.accessibilityDelegate = object : View.AccessibilityDelegate() {
-            override fun sendAccessibilityEvent(host: View, eventType: Int) {
-                super.sendAccessibilityEvent(host, eventType)
-                if (eventType == android.view.accessibility.AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) {
-                    val start = binding.ktg.selectionStart
-                    val end = binding.ktg.selectionEnd
-                    val editable = binding.ktg.text ?: return
-                    val spans = editable.getSpans(start, end, ForegroundColorSpan::class.java)
-                    for (span in spans) {
-                        val spanStart = editable.getSpanStart(span)
-                        val spanEnd = editable.getSpanEnd(span)
-                        if (start == end && start in (spanStart+1)..<spanEnd) {
-                            binding.ktg.setSelection(
-                                if (start < (spanStart + spanEnd) / 2) spanStart else spanEnd
-                            )
-                            break
-                        }
-                        if (start != end) {
-                            var newStart = start; var newEnd = end
-                            if (start in (spanStart+1)..<spanEnd) newStart = spanStart
-                            if (end in (spanStart+1)..<spanEnd) newEnd = spanEnd
-                            if (newStart != start || newEnd != end) {
-                                binding.ktg.setSelection(newStart, newEnd)
-                                break
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        spanWatcher = SpanWatcher.attach(binding.ktg)
     }
 
     // ========================================================================

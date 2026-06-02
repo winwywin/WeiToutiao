@@ -2,7 +2,7 @@
 
 ## 项目概况
 微头条发布器仿写练习项目。MVI 架构（PublishIntent → PublishViewModel → PublishState → View）。
-最新 commit：`fe5c869` Day 17：图片压缩 + 分步上传模拟
+最新 commit：`afd9fdd` A7：四层包强隔离重构（model→models / util→data / view→views）
 
 ## 已完成功能清单
 | Commit 标签 | 功能 |
@@ -59,9 +59,9 @@
 
 ## 关键文件路径
 - `app/src/main/java/com/example/test_micrott/`
-  - `model/` — PublishState, PublishIntent, SpanDescriptor
-  - `util/` — ImageCompressor, ThumbnailCache
-  - `view/` — MainActivity, ImageGridAdapter, GalleryPickerAdapter, ImagePreviewActivity...
+  - `models/` — PublishState, PublishIntent, SpanDescriptor, TopicItem
+  - `data/` — ImageCompressor, ThumbnailCache, DraftManager, DraftDatabaseHelper
+  - `views/` — MainActivity, ImageGridAdapter, GalleryPickerAdapter/Activity/Contract, ImagePreviewActivity, DraftListActivity, SquareFrameLayout...
   - `viewmodels/PublishViewModel.kt`
 - `app/src/main/res/layout/activity_main.xml`
 

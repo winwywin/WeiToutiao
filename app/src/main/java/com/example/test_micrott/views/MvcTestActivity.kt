@@ -8,7 +8,6 @@ import android.text.Spanned
 import android.text.TextWatcher
 import android.text.style.ForegroundColorSpan
 import android.util.Log
-import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -45,6 +44,9 @@ class MvcTestActivity : AppCompatActivity() {
     // day3：把今天新加的网格控件和它的干活适配器塞进声明区
     private lateinit var rvImages: RecyclerView
     private lateinit var imageGridAdapter: ImageGridAdapter
+
+    // A9 SpanWatcher：#话题# / @提及 块删除守卫
+    private lateinit var spanWatcher: SpanWatcher
 
 
     // day2:用于暂存当前选中的图片 Uri 列表（沙盒阶段临时记录）
@@ -210,83 +212,7 @@ class MvcTestActivity : AppCompatActivity() {
     }
     // day3：把这个话题守卫引擎，当作新方法加进 Activity 肚子里
     private fun setupTopicTokenGuard() {
-        // A. 拦截退格键（KEYCODE_DEL）实现一键整块销毁
-        etEditor.setOnKeyListener { _, keyCode, event ->
-            if (keyCode == KeyEvent.KEYCODE_DEL && event.action == KeyEvent.ACTION_DOWN) {
-                val start = etEditor.selectionStart
-                val end = etEditor.selectionEnd
-                if (start == end) {
-                    val editable = etEditor.text
-                    val spans = editable.getSpans(start, start, ForegroundColorSpan::class.java)
-                    for (span in spans) {
-                        val spanEnd = editable.getSpanEnd(span)
-                        if (start == spanEnd) { // 光标卡在话题最右边的 # 后面
-                            val spanStart = editable.getSpanStart(span)
-                            editable.delete(spanStart, spanEnd) // 顺位切除
-                            return@setOnKeyListener true // 拦截拦截
-                        }
-                    }
-                }
-            }
-            false
-        }
-
-        // B. 拦截光标触摸（防止手指戳进话题中间，实行两极边缘磁吸）
-        etEditor.setOnClickListener {
-            val position = etEditor.selectionStart
-            val editable = etEditor.text ?: return@setOnClickListener
-            val spans = editable.getSpans(position, position, ForegroundColorSpan::class.java)
-            for (span in spans) {
-                val start = editable.getSpanStart(span)
-                val end = editable.getSpanEnd(span)
-                if (position in (start + 1)..<end) {
-                    if (position < (start + end) / 2) etEditor.setSelection(start) else etEditor.setSelection(end)
-                    break
-                }
-            }
-        }
-        // C.:当用户长按试图滑动选中、或者系统尝试改变光标选择区间时，强制将非法光标弹回边界
-        etEditor.setAccessibilityDelegate(object : android.view.View.AccessibilityDelegate() {
-            override fun sendAccessibilityEvent(host: android.view.View, eventType: Int) {
-                super.sendAccessibilityEvent(host, eventType)
-                // TYPE_VIEW_TEXT_SELECTION_CHANGED 代表系统的光标或选择区域发生了变化（长按拖拽时必发）
-                if (eventType == android.view.accessibility.AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) {
-                    val start = etEditor.selectionStart
-                    val end = etEditor.selectionEnd
-                    val editable = etEditor.text ?: return
-
-                    // 检查当前光标（或选择区边界）有没有不幸“陷进”话题内部
-                    val spans = editable.getSpans(start, end, ForegroundColorSpan::class.java)
-                    for (span in spans) {
-                        val spanStart = editable.getSpanStart(span)
-                        val spanEnd = editable.getSpanEnd(span)
-
-                        // 1. 如果是纯光标闪烁（start == end）且陷在了话题肚子里
-                        if (start == end && (start in (spanStart+1)..<spanEnd)) {
-                            if (start < (spanStart + spanEnd) / 2) {
-                                etEditor.setSelection(spanStart) // 强行吸附到左边
-                            } else {
-                                etEditor.setSelection(spanEnd)   // 强行吸附到右边
-                            }
-                            break
-                        }
-
-                        // 2. 如果是长按拖出了一段文本（start != end），且选区的边界斩断了话题
-                        // 比如选区偷偷包住了话题的一部分，大厂规范也是不允许的，强行扩大选区包裹整个话题
-                        if (start != end) {
-                            var newStart = start
-                            var newEnd = end
-                            if (start in (spanStart+1)..<spanEnd) newStart = spanStart
-                            if (end in (spanStart+1)..<spanEnd) newEnd = spanEnd
-                            if ((newStart != start) || (newEnd != end)) {
-                                etEditor.setSelection(newStart, newEnd) // 强行校正选区
-                                break
-                            }
-                        }
-                    }
-                }
-            }
-        })
+        spanWatcher = SpanWatcher.attach(etEditor)
     }
 }
 

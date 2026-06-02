@@ -111,13 +111,13 @@
                     android:textSize="12sp"
                     android:textColor="#999999" />
 
-                <!-- 九宫格图片容器 -->
-                <androidx.recyclerview.widget.RecyclerView
+                <!-- A9 自定义九宫格 ViewGroup — 完全自实现 onMeasure/onLayout -->
+                <com.example.test_micrott.views.NineGridLayout
                     android:id="@+id/grid_image_container"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:paddingHorizontal="@dimen/wtt_spacing_standard"
-                    android:overScrollMode="never" />
+                    android:paddingVertical="4dp" />
 
             </LinearLayout>
         </ScrollView>
