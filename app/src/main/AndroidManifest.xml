@@ -19,25 +19,33 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Test_microTT">
+
+        <!-- 允许 Android Studio Profiler 分析此进程（Debug only，Release 会自动忽略） -->
+        <profileable android:shell="true" />
         <activity
             android:name=".views.MvcTestActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:screenOrientation="portrait" />
         <activity
             android:name=".views.GalleryPickerActivity"
             android:exported="false"
-            android:theme="@style/Theme.Test_microTT" />
+            android:theme="@style/Theme.Test_microTT"
+            android:screenOrientation="portrait" />
         <activity
             android:name=".views.ImagePreviewActivity"
             android:exported="false"
-            android:theme="@style/Theme.Test_microTT" />
+            android:theme="@style/Theme.Test_microTT"
+            android:screenOrientation="portrait" />
         <activity
             android:name=".views.DraftListActivity"
             android:exported="false"
-            android:theme="@style/Theme.Test_microTT" />
+            android:theme="@style/Theme.Test_microTT"
+            android:screenOrientation="portrait" />
         <activity
             android:name=".views.MainActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
