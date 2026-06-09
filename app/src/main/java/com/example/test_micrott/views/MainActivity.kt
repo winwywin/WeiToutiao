@@ -36,7 +36,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.toColorInt
 import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.RecyclerView  // ImageGridAdapter 内部仍需引用
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import kotlinx.coroutines.launch
 
@@ -66,8 +65,6 @@ class MainActivity : AppCompatActivity() {
 
     // A9 自定义九宫格 ViewGroup（替换 RecyclerView + ImageGridAdapter + GridLayoutManager）
     private lateinit var nineGridLayout: NineGridLayout
-    // 保留 adapter 用于拖拽排序兼容（ItemTouchHelper 仍附着在 RecyclerView 上）
-    private lateinit var imageGridAdapter: ImageGridAdapter
 
     // Day 8 新增：缓存上次图片列表引用，避免每帧打字触发 notifyDataSetChanged
     private var lastImageList: List<Uri> = emptyList()
@@ -140,12 +137,12 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         initRecyclerView()
-        initDragSupport()         // Day 7: 拖拽排序
         initIntentEmitters()
         observeUiState()
         setupTopicTokenGuard()     // A9：内部实际调用 SpanWatcher.attach()
         initFormattingToolbar()   // Day 16: 富文本格式化工具栏
         setupBackPressedDispatcher()  // Day 22++: 返回键拦截改用 OnBackPressedDispatcher
+        lifecycle.addObserver(viewModel)  // ViewModel 实现 DefaultLifecycleObserver，自动收生命周期回调
     }
 
     // ========================================================================
@@ -160,67 +157,21 @@ class MainActivity : AppCompatActivity() {
         nineGridLayout.onDeleteClick = { index -> viewModel.sendIntent(PublishIntent.RemoveImage(index)) }
         nineGridLayout.onImageClick = { index -> launchImagePreview(index) }
 
-        // 兼容层：保留 ImageGridAdapter 用于拖拽排序坐标映射
-        imageGridAdapter = ImageGridAdapter(lifecycleScope)
-        imageGridAdapter.setListeners(
-            onAddClickListener = { tryPickPhotos() },
-            onDeleteClickListener = { index -> viewModel.sendIntent(PublishIntent.RemoveImage(index)) },
-            onMoveListener = { from, to -> viewModel.sendIntent(PublishIntent.MoveImage(from, to)) },
-            onImageClickListener = { index -> launchImagePreview(index) }
-        )
-    }
+        // 关键：初始空列表必须显式调用，否则 render() 里
+        // state.selectedImages == lastImageList（均为 emptyList()）
+        // 导致 setImages() 永远不触发，加号占位符不显示
+        nineGridLayout.setImages(emptyList())
 
-    // ── A9：NineGridLayout 拖拽排序（基础版，无实时预览动画）──
-
-    private var dragStartIndex = -1
-    private var dragStartX = 0f
-    private var dragStartY = 0f
-
-    private fun initDragSupport() {
-        nineGridLayout.setOnTouchListener { v, event ->
-            if (nineGridLayout.getImages().isEmpty()) return@setOnTouchListener false
-
-            when (event.action) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    val idx = nineGridLayout.indexAtPoint(event.x, event.y)
-                    // 只拖拽图片格（最后一个是加号按钮）
-                    if (idx >= 0 && idx < nineGridLayout.getImages().size) {
-                        dragStartIndex = idx
-                        dragStartX = event.rawX
-                        dragStartY = event.rawY
-                    }
-                    false
-                }
-                android.view.MotionEvent.ACTION_MOVE -> {
-                    if (dragStartIndex < 0) return@setOnTouchListener false
-                    val dx = event.rawX - dragStartX
-                    val dy = event.rawY - dragStartY
-                    val absDx = Math.abs(dx); val absDy = Math.abs(dy)
-                    // 不做实时动画，只记录
-                    false
-                }
-                android.view.MotionEvent.ACTION_UP -> {
-                    if (dragStartIndex < 0) return@setOnTouchListener false
-                    val targetIdx = nineGridLayout.indexAtPoint(event.x, event.y)
-                    if (targetIdx >= 0 && targetIdx < nineGridLayout.getImages().size
-                        && targetIdx != dragStartIndex) {
-                        nineGridLayout.commitSwap(dragStartIndex, targetIdx) { from, to ->
-                            viewModel.sendIntent(PublishIntent.MoveImage(from, to))
-                        }
-                    }
-                    dragStartIndex = -1
-                    false
-                }
-                else -> false
-            }
+        // 拖拽松手后接收最终顺序，原子提交 ReorderImages
+        nineGridLayout.onReorder = { reordered ->
+            viewModel.sendIntent(PublishIntent.ReorderImages(reordered))
         }
     }
 
-    /**
-     * Day 11 升级：启动自定义相册选择器。
-     * Day 14 追加：先检查运行时权限。
-     * 传入已选照片的 MediaStore._ID 列表，相册内会显示勾选标记。
-     */
+    // ========================================================================
+    // 初始化
+    // ========================================================================
+
     private fun tryPickPhotos() {
         if (checkSelfPermission(photoPermission) == PackageManager.PERMISSION_GRANTED) {
             launchGalleryPicker()
@@ -240,7 +191,7 @@ class MainActivity : AppCompatActivity() {
         }
         val preSelectedIds = extractMediaIds(currentImages)
         Log.d(tag, "📷 [View] 启动自定义相册，剩余名额 $maxSlots，已选 ${preSelectedIds.size} 张")
-        viewModel.notifyInternalActivityLaunch()
+        viewModel.sendIntent(PublishIntent.LaunchInternalActivity)
         pickMultipleMedia.launch(PickConfig(maxSelectable = maxSlots, preSelectedIds = preSelectedIds))
     }
 
@@ -276,7 +227,7 @@ class MainActivity : AppCompatActivity() {
         val uriStrings = ArrayList<String>(uris.size)
         uris.forEach { uriStrings.add(it.toString()) }
 
-        viewModel.notifyInternalActivityLaunch()
+        viewModel.sendIntent(PublishIntent.LaunchInternalActivity)
         val intent = Intent(this, ImagePreviewActivity::class.java).apply {
             putStringArrayListExtra(ImagePreviewActivity.EXTRA_URI_LIST, uriStrings)
             putExtra(ImagePreviewActivity.EXTRA_POSITION, safePos)
@@ -292,12 +243,20 @@ class MainActivity : AppCompatActivity() {
     private fun initIntentEmitters() {
         binding.ktg.doAfterTextChanged { text ->
             viewModel.sendIntent(PublishIntent.TextChanged(text.toString()))
+            saveCurrentFormattingState()  // Day 24+: 文本变化后实时更新 Span offset，防止草稿存错位置
         }
 
         // Day 22+：EditText 获得焦点 → 编辑器被触碰，切换按钮状态
+        // Day 24 修复：获得焦点即显示富文本工具栏（不要求先输入文字）
         binding.ktg.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) {
                 viewModel.sendIntent(PublishIntent.EditorTouched)
+                showFormattingToolbar()
+            } else {
+                // 失去焦点时，仅当文本为空才隐藏工具栏
+                if (binding.ktg.text.isNullOrBlank()) {
+                    hideFormattingToolbar()
+                }
             }
         }
 
@@ -311,7 +270,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnDraftBox.setOnClickListener {
-            viewModel.notifyInternalActivityLaunch()
+            viewModel.sendIntent(PublishIntent.LaunchInternalActivity)
             val intent = Intent(this, DraftListActivity::class.java)
             draftListLauncher.launch(intent)
         }
@@ -553,25 +512,6 @@ class MainActivity : AppCompatActivity() {
     // Day 22+：草稿恢复 — 已移至 DraftListActivity
     // ========================================================================
 
-    // ========================================================================
-    // Day 22+：生命周期回调 — 双层草稿机制
-    // ========================================================================
-
-    override fun onPause() {
-        super.onPause()
-        viewModel.onActivityPause()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        viewModel.onActivityResume()
-    }
-
-    override fun onStop() {
-        super.onStop()
-        viewModel.onActivityStop()
-    }
-
     /**
      * 系统返回键/手势 → 弹出退出确认框（有内容时）。
      * 迁移到 AndroidX OnBackPressedDispatcher，替代已废弃的 onBackPressed()。
@@ -579,7 +519,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupBackPressedDispatcher() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (viewModel.hasContent()) {
+                if (viewModel.state.value.hasContent) {
                     showExitConfirmDialog()
                 } else {
                     // 无内容 → 释放拦截，走系统默认返回
@@ -598,7 +538,7 @@ class MainActivity : AppCompatActivity() {
      * - 取消：关闭弹窗，留在当前页面
      */
     private fun showExitConfirmDialog() {
-        if (!viewModel.hasContent()) {
+        if (!viewModel.state.value.hasContent) {
             finish()
             return
         }
@@ -717,6 +657,7 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener {
                 val customTopic = inputField.text.toString().trim()
                 if (customTopic.isNotEmpty()) {
+                    insertTopicIntoEditor(customTopic)
                     viewModel.sendIntent(PublishIntent.SelectTopic(customTopic))
                     bottomSheet.dismiss()
                 }
@@ -775,6 +716,7 @@ class MainActivity : AppCompatActivity() {
                     setColor(Color.TRANSPARENT)
                 }
                 setOnClickListener {
+                    insertTopicIntoEditor(topic.name)
                     viewModel.sendIntent(PublishIntent.SelectTopic(topic.name))
                     bottomSheet.dismiss()
                 }
@@ -841,8 +783,9 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        // 提及 @xxx（以空格/标点/结尾为边界）
-        val mentionPattern = Regex("@[^\\s@#]+")
+        // 提及 @xxx（以零宽空格/空格/标点/结尾为边界）
+        // 零宽空格 \u200B 作为不可见边界标记
+        val mentionPattern = Regex("@[^\\s@#​]+(?=[\\s​@#]|$)")
         mentionPattern.findAll(text).forEach { match ->
             editable.setSpan(
                 ForegroundColorSpan(blue),
@@ -896,12 +839,12 @@ class MainActivity : AppCompatActivity() {
             end = editable.length
         }
 
-        val mentionText = "@$userName "
+        val mentionText = "@$userName​ "  // 零宽空格 \u200B 作为不可见边界标记
         val spannableStringBuilder = SpannableStringBuilder(mentionText)
         // 只对 @用户名 部分设 Span（不含尾部空格）
         spannableStringBuilder.setSpan(
             ForegroundColorSpan("#2A62FF".toColorInt()),
-            0, mentionText.length - 1,
+            0, mentionText.length - 2,
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
         )
 
@@ -912,6 +855,39 @@ class MainActivity : AppCompatActivity() {
 
         viewModel.sendIntent(PublishIntent.InsertMention(mentionText))
         Log.d(tag, "📝 [View] 插入 @提及: $mentionText")
+    }
+
+    /**
+     * 将 #话题名 以蓝色 Span 插入 EditText 光标位置。
+     * 仅 #话题名 部分设 Span（不含尾部空格），与 insertMentionIntoEditor 保持一致。
+     */
+    private fun insertTopicIntoEditor(topicName: String) {
+        val editable = binding.ktg.text ?: return
+        var start = binding.ktg.selectionStart
+        var end = binding.ktg.selectionEnd
+
+        if (start < 0) {
+            start = editable.length
+            end = editable.length
+        }
+
+        // 格式 "#话题名# " — 两端各一个 #，与 reapplyProtectedSpans 的正则 #[^#]*# 保持一致
+        val topicText = "#$topicName# "  // 尾部空格作为自然分隔
+        val spannableStringBuilder = SpannableStringBuilder(topicText)
+        // Span 覆盖 "#话题名#"（含两端 #），不含尾部空格
+        spannableStringBuilder.setSpan(
+            ForegroundColorSpan("#2A62FF".toColorInt()),
+            0, topicText.length - 1,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+
+        isProgrammaticChange = true
+        editable.replace(start, end, spannableStringBuilder)
+        isProgrammaticChange = false
+        binding.ktg.setSelection(start + topicText.length)
+
+        viewModel.sendIntent(PublishIntent.InsertTopic(topicText))
+        Log.d(tag, "📝 [View] 插入话题: $topicText")
     }
 
     // ========================================================================
@@ -1078,23 +1054,27 @@ class MainActivity : AppCompatActivity() {
 
         // ================================================================
         // 选区模式：对选中文字应用/移除粗体
+        // 之后激活对应待定格式，让后续打字继承（不清空）
         // ================================================================
-        clearPendingFormats()
 
         val existingBoldSpans = editable.getSpans(selStart, selEnd, StyleSpan::class.java)
             .filter { it.style == Typeface.BOLD }
 
         if (existingBoldSpans.isNotEmpty()) {
+            // 选区内已有粗体 → 移除，且不激活待定粗体
             existingBoldSpans.forEach { span ->
                 removeSpanFromSelection(editable, span, selStart, selEnd) {
                     StyleSpan(Typeface.BOLD)
                 }
             }
+            pendingBoldActive = false
         } else {
             editable.setSpan(
                 StyleSpan(Typeface.BOLD), selStart, selEnd,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
             )
+            // 刚给选区加了粗体 → 激活待定粗体，后续打字自动带粗体
+            pendingBoldActive = true
         }
 
         updateFormattingButtonStates(selStart, selEnd)
@@ -1119,23 +1099,26 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // 选区模式
-        clearPendingFormats()
-
+        // 选区模式：应用/移除斜体
+        // 之后激活对应待定格式，让后续打字继承（不清空）
         val existingItalicSpans = editable.getSpans(selStart, selEnd, StyleSpan::class.java)
             .filter { it.style == Typeface.ITALIC }
 
         if (existingItalicSpans.isNotEmpty()) {
+            // 选区内已有斜体 → 移除，且不激活待定斜体
             existingItalicSpans.forEach { span ->
                 removeSpanFromSelection(editable, span, selStart, selEnd) {
                     StyleSpan(Typeface.ITALIC)
                 }
             }
+            pendingItalicActive = false
         } else {
             editable.setSpan(
                 StyleSpan(Typeface.ITALIC), selStart, selEnd,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
             )
+            // 刚给选区加了斜体 → 激活待定斜体，后续打字自动带斜体
+            pendingItalicActive = true
         }
 
         updateFormattingButtonStates(selStart, selEnd)
@@ -1157,9 +1140,11 @@ class MainActivity : AppCompatActivity() {
 
         ColorPickerPopup(this) { color ->
             if (hasSelection) {
-                // 选区模式：直接应用颜色
-                clearPendingFormats()
+                // 选区模式：直接应用颜色，并激活待定颜色让后续打字继承
                 applyTextColor(color, selStart, selEnd)
+                pendingColor = color
+                updateFormattingButtonStates(selStart, selEnd)
+                Log.d(tag, "🎨 [View] 选区着色 + 激活待定颜色: #${Integer.toHexString(color)}")
             } else {
                 // Type-Ahead 模式：激活待定颜色
                 pendingColor = color
@@ -1365,6 +1350,9 @@ class MainActivity : AppCompatActivity() {
 
             applyPendingSpansToRange(s, insertStart, end)
 
+            // 将新应用的格式同步到 State，确保草稿保存时不丢失 Type-Ahead 格式
+            saveCurrentFormattingState()
+
             // 插入完成后不清除待定格式（用户可能继续打字），
             // 但需要刷新按钮状态以反映当前光标位置
             updateFormattingButtonStates(
@@ -1416,10 +1404,4 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 清除所有待定格式（用户显式选中文本应用格式时调用） */
-    private fun clearPendingFormats() {
-        pendingBoldActive = false
-        pendingItalicActive = false
-        pendingColor = null
-    }
 }
