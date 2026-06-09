@@ -1,19 +1,27 @@
 ﻿package com.example.test_micrott.views
 
 import android.content.ContentUris
-import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Log
+import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.ViewPager2
 import com.example.test_micrott.R
+import com.example.test_micrott.data.ImageCompressor
+import com.example.test_micrott.data.ThumbnailCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -43,6 +51,15 @@ class GalleryPickerActivity : AppCompatActivity() {
     private lateinit var tvConfirm: TextView
     private lateinit var progressBar: ProgressBar
     private lateinit var rvGallery: RecyclerView
+
+    // 预览层
+    private lateinit var previewOverlay: FrameLayout
+    private lateinit var vpPreview: ViewPager2
+    private lateinit var tvPreviewCount: TextView
+    private lateinit var btnPreviewCheck: ImageView
+    private lateinit var btnPreviewBack: ImageView
+    private var previewAdapter: PreviewPagerAdapter? = null
+    private var currentPreviewPosition = 0
     private val scope = CoroutineScope(Dispatchers.Main + Job())
 
     // 从 Intent 读取的输入
@@ -91,10 +108,30 @@ class GalleryPickerActivity : AppCompatActivity() {
         )
         rvGallery.adapter = adapter
 
+        // 初始化预览层
+        previewOverlay = findViewById(R.id.preview_overlay)
+        vpPreview = findViewById(R.id.vp_preview)
+        tvPreviewCount = findViewById(R.id.tv_preview_count)
+        btnPreviewCheck = findViewById(R.id.btn_preview_check)
+        btnPreviewBack = findViewById(R.id.btn_preview_back)
+
+        btnPreviewBack.setOnClickListener { hidePreview() }
+        btnPreviewCheck.setOnClickListener { togglePreviewCheck() }
+
         // 开始加载：显示进度条
         progressBar.visibility = View.VISIBLE
         rvGallery.visibility = View.GONE
         loadPhotos(preselectedSet)
+
+        // 返回键：优先关闭预览层
+        onBackPressedDispatcher.addCallback(this) {
+            if (previewOverlay.visibility == View.VISIBLE) {
+                hidePreview()
+            } else {
+                isEnabled = false
+                onBackPressedDispatcher.onBackPressed()
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -235,17 +272,64 @@ class GalleryPickerActivity : AppCompatActivity() {
     }
 
     // ========================================================================
-    // 预览大图（长按触发）
+    // 预览大图（点击触发，内嵌覆盖层）
     // ========================================================================
 
     private fun previewPhoto(position: Int) {
         if (allPhotos.isEmpty()) return
-        val uriStrings = allPhotos.map { it.uri.toString() }
-        val intent = Intent(this, ImagePreviewActivity::class.java).apply {
-            putStringArrayListExtra(ImagePreviewActivity.EXTRA_URI_LIST, ArrayList(uriStrings))
-            putExtra(ImagePreviewActivity.EXTRA_POSITION, position)
+        currentPreviewPosition = position
+
+        previewAdapter = PreviewPagerAdapter(allPhotos, scope)
+        vpPreview.adapter = previewAdapter
+        vpPreview.setCurrentItem(position, false)
+        vpPreview.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(pos: Int) {
+                currentPreviewPosition = pos
+                updatePreviewIndicator()
+            }
+        })
+
+        updatePreviewIndicator()
+        previewOverlay.visibility = View.VISIBLE
+    }
+
+    private fun hidePreview() {
+        previewOverlay.visibility = View.GONE
+        vpPreview.adapter = null
+        previewAdapter = null
+        // 刷新网格的勾选状态
+        adapter.notifyDataSetChanged()
+        updateConfirmButton()
+    }
+
+    private fun updatePreviewIndicator() {
+        tvPreviewCount.text = "${currentPreviewPosition + 1}/${allPhotos.size}"
+        val photo = allPhotos.getOrNull(currentPreviewPosition)
+        btnPreviewCheck.setImageResource(
+            if (photo?.isSelected == true) R.drawable.ic_check_circle
+            else R.drawable.ic_check_circle_empty
+        )
+    }
+
+    private fun togglePreviewCheck() {
+        val photo = allPhotos.getOrNull(currentPreviewPosition) ?: return
+        val selectedCount = allPhotos.count { it.isSelected }
+
+        if (photo.isSelected) {
+            photo.isSelected = false
+            selectedOrder.remove(photo.mediaId)
+        } else {
+            val totalLimit = maxSelectable + preselectedIds.size
+            if (selectedCount >= totalLimit) {
+                Toast.makeText(this, "最多选${totalLimit}张", Toast.LENGTH_SHORT).show()
+                return
+            }
+            photo.isSelected = true
+            selectedOrder.add(photo.mediaId)
         }
-        startActivity(intent)
+        updatePreviewIndicator()
+        adapter.notifyItemChanged(currentPreviewPosition)
+        updateConfirmButton()
     }
 
     // ========================================================================
@@ -267,5 +351,64 @@ class GalleryPickerActivity : AppCompatActivity() {
         }
         setResult(RESULT_OK, data)
         finish()
+    }
+
+    // ========================================================================
+    // 预览 ViewPager2 适配器（内嵌）
+    // ========================================================================
+
+    private class PreviewPagerAdapter(
+        private val photos: List<GalleryPhoto>,
+        private val scope: CoroutineScope
+    ) : RecyclerView.Adapter<PreviewPagerAdapter.PreviewViewHolder>() {
+
+        override fun getItemCount(): Int = photos.size
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PreviewViewHolder {
+            val iv = ImageView(parent.context).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            }
+            return PreviewViewHolder(iv)
+        }
+
+        override fun onBindViewHolder(holder: PreviewViewHolder, position: Int) {
+            holder.bind(photos[position])
+        }
+
+        override fun onViewRecycled(holder: PreviewViewHolder) {
+            holder.loadJob?.cancel()
+            holder.imageView.setImageDrawable(null)
+        }
+
+        inner class PreviewViewHolder(val imageView: ImageView) : RecyclerView.ViewHolder(imageView) {
+            var loadJob: Job? = null
+
+            fun bind(photo: GalleryPhoto) {
+                loadJob?.cancel()
+                val cacheKey = "preview_${photo.uri}"
+                val cached = ThumbnailCache.get(cacheKey)
+                if (cached != null) {
+                    imageView.setImageBitmap(cached)
+                    return
+                }
+
+                val targetSize = imageView.resources.displayMetrics.widthPixels
+                loadJob = scope.launch {
+                    val bitmap = withContext(Dispatchers.IO) {
+                        ImageCompressor.decodeSampledBitmap(
+                            imageView.context, photo.uri, targetSize, targetSize
+                        )
+                    }
+                    if (bitmap != null) {
+                        ThumbnailCache.put(cacheKey, bitmap)
+                        imageView.setImageBitmap(bitmap)
+                    }
+                }
+            }
+        }
     }
 }

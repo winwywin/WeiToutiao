@@ -56,4 +56,53 @@
         android:clipToPadding="false"
         android:padding="2dp" />
 
+    <!-- 全屏预览覆盖层（默认隐藏） -->
+    <FrameLayout
+        android:id="@+id/preview_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#000000"
+        android:visibility="gone">
+
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/vp_preview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="12dp"
+            android:background="#CC000000">
+
+            <ImageView
+                android:id="@+id/btn_preview_back"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@drawable/ic_back_white"
+                android:padding="4dp" />
+
+            <TextView
+                android:id="@+id/tv_preview_count"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="12dp"
+                android:text="1/500"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp" />
+
+            <ImageView
+                android:id="@+id/btn_preview_check"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:src="@drawable/ic_check_circle"
+                android:padding="2dp" />
+
+        </LinearLayout>
+
+    </FrameLayout>
+
 </LinearLayout>

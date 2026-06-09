@@ -76,17 +76,20 @@ class GalleryPickerAdapter(
         // Day 8: 异步加载缩略图，复用 ImageCompressor + ThumbnailCache
         loadThumbnailAsync(holder, photo)
 
-        // 选中状态
+        // 选中状态：右下角勾选图标始终显示（选中=实心，未选中=空心圆）
         val isSelected = photo.isSelected
         holder.overlay.visibility = if (isSelected) View.VISIBLE else View.GONE
-        holder.checkMark.visibility = if (isSelected) View.VISIBLE else View.GONE
+        holder.checkMark.visibility = View.VISIBLE
+        holder.checkMark.setImageResource(
+            if (isSelected) R.drawable.ic_check_circle
+            else R.drawable.ic_check_circle_empty
+        )
 
         holder.itemView.setOnClickListener {
-            onToggle(position)
-        }
-        holder.itemView.setOnLongClickListener {
             onPreviewClick(position)
-            true
+        }
+        holder.checkMark.setOnClickListener {
+            onToggle(position)
         }
     }
 
