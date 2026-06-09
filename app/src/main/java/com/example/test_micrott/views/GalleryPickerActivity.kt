@@ -1,6 +1,7 @@
 ﻿package com.example.test_micrott.views
 
 import android.content.ContentUris
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -84,7 +85,10 @@ class GalleryPickerActivity : AppCompatActivity() {
         // 网格
         rvGallery = findViewById(R.id.rv_gallery)
         rvGallery.layoutManager = GridLayoutManager(this, COLUMN_COUNT)
-        adapter = GalleryPickerAdapter(scope) { position -> toggleSelection(position) }
+        adapter = GalleryPickerAdapter(scope,
+            onToggle = { position -> toggleSelection(position) },
+            onPreviewClick = { position -> previewPhoto(position) }
+        )
         rvGallery.adapter = adapter
 
         // 开始加载：显示进度条
@@ -228,6 +232,20 @@ class GalleryPickerActivity : AppCompatActivity() {
     private fun updateConfirmButton() {
         val count = allPhotos.count { it.isSelected }
         tvConfirm.text = "完成($count/$MAX_TOTAL)"
+    }
+
+    // ========================================================================
+    // 预览大图（长按触发）
+    // ========================================================================
+
+    private fun previewPhoto(position: Int) {
+        if (allPhotos.isEmpty()) return
+        val uriStrings = allPhotos.map { it.uri.toString() }
+        val intent = Intent(this, ImagePreviewActivity::class.java).apply {
+            putStringArrayListExtra(ImagePreviewActivity.EXTRA_URI_LIST, ArrayList(uriStrings))
+            putExtra(ImagePreviewActivity.EXTRA_POSITION, position)
+        }
+        startActivity(intent)
     }
 
     // ========================================================================

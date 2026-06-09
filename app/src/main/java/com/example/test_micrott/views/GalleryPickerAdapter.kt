@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class GalleryPickerAdapter(
     private val scope: CoroutineScope,
     private val onToggle: (Int) -> Unit,
+    private val onPreviewClick: (Int) -> Unit = {},
 ) : RecyclerView.Adapter<GalleryPickerAdapter.PhotoViewHolder>() {
 
     companion object {
@@ -82,6 +83,10 @@ class GalleryPickerAdapter(
 
         holder.itemView.setOnClickListener {
             onToggle(position)
+        }
+        holder.itemView.setOnLongClickListener {
+            onPreviewClick(position)
+            true
         }
     }
 
