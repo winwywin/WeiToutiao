@@ -31,8 +31,8 @@ class ColorPickerPopup(
         "#0066FF".toColorInt(),  // 蓝
         "#9933FF".toColorInt(),  // 紫
         "#FF3399".toColorInt(),  // 粉
+        "#00CCCC".toColorInt(),  // 青
         "#666666".toColorInt(),  // 灰
-        "#333333".toColorInt(),  // 深灰
         "#000000".toColorInt(),  // 黑
     )
 
@@ -56,12 +56,6 @@ class ColorPickerPopup(
                 background = GradientDrawable().apply {
                     setColor(color)
                     shape = GradientDrawable.OVAL
-                    val strokeColor = if (color == Color.BLACK || color == "#333333".toColorInt()) {
-                        "#AAAAAA".toColorInt()
-                    } else {
-                        Color.WHITE
-                    }
-                    setStroke((2 * density).toInt(), strokeColor)
                 }
                 setOnClickListener {
                     onColorPicked(color)
