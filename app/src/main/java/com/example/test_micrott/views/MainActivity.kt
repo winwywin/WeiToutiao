@@ -949,16 +949,6 @@ class MainActivity : AppCompatActivity() {
         }
         binding.ktg.setOnTouchListener(touchListener)
 
-        // 有文本时显示工具栏，无文本时隐藏
-        binding.ktg.doAfterTextChanged { text ->
-            val hasText = !text.isNullOrBlank()
-            if (hasText && !isFormattingToolbarVisible) {
-                showFormattingToolbar()
-            } else if (!hasText && isFormattingToolbarVisible) {
-                hideFormattingToolbar()
-            }
-        }
-
         // Day 16 type-ahead：监听输入，自动应用待定格式
         binding.ktg.addTextChangedListener(TypeAheadTextWatcher())
     }
