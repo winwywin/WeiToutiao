@@ -4,13 +4,13 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import com.example.test_micrott.models.SpanDescriptor
+import com.example.test_micrott.repository.DraftData
+import com.example.test_micrott.repository.DraftRepository
+import com.example.test_micrott.repository.DraftSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * 微头条草稿管理器（Day 22+ 重构为单表多草稿）
@@ -27,7 +27,7 @@ import java.util.Locale
  *     onResume → 删除所有临时草稿（用户回来了，数据没丢）
  *     onStop   → 标记所有临时为永久（用户真走了）
  */
-class DraftManager(private val context: Context) {
+class DraftManager(private val context: Context) : DraftRepository {
 
     companion object {
         private const val TAG = "DraftManager"
@@ -44,7 +44,7 @@ class DraftManager(private val context: Context) {
     // ================================================================
 
     /** 是否存在任意草稿 */
-    fun hasDraft(): Boolean {
+    override fun hasDraft(): Boolean {
         val db = dbHelper.readableDatabase
         val cursor = db.rawQuery(
             "SELECT COUNT(*) FROM ${DraftDatabaseHelper.TABLE_DRAFTS}", null
@@ -56,7 +56,7 @@ class DraftManager(private val context: Context) {
      * 获取所有草稿的摘要信息（草稿箱列表用）。
      * 按 saved_at 逆序，包含文本预览（前 80 字符）和图片数量。
      */
-    fun getAllDrafts(): List<DraftSummary> {
+    override fun getAllDrafts(): List<DraftSummary> {
         val db = dbHelper.readableDatabase
         val cursor = db.rawQuery(
             "SELECT ${DraftDatabaseHelper.COL_ID}, " +
@@ -97,7 +97,7 @@ class DraftManager(private val context: Context) {
     /**
      * 读取单条草稿的完整数据（用于恢复）。
      */
-    fun getDraft(id: Long): DraftData? {
+    override fun getDraft(id: Long): DraftData? {
         val db = dbHelper.readableDatabase
         val cursor = db.rawQuery(
             "SELECT ${DraftDatabaseHelper.COL_TEXT}, " +
@@ -134,7 +134,7 @@ class DraftManager(private val context: Context) {
      *
      * @return 新草稿的 id（-1 表示保存失败）
      */
-    suspend fun saveDraft(
+    override suspend fun saveDraft(
         text: String,
         imageUris: List<Uri>,
         formatSpans: List<SpanDescriptor>
@@ -146,7 +146,7 @@ class DraftManager(private val context: Context) {
      * 保存临时草稿（防抖机制，onPause 自动调用）。
      * is_temporary=1，后续 onResume 删除 / onStop 变永久。
      */
-    suspend fun saveTemporaryDraft(
+    override suspend fun saveTemporaryDraft(
         text: String,
         imageUris: List<Uri>,
         formatSpans: List<SpanDescriptor>
@@ -165,39 +165,47 @@ class DraftManager(private val context: Context) {
             val savedAt = System.currentTimeMillis()
             val db = dbHelper.writableDatabase
 
-            // 图片路径 → JSONArray
-            val imagesJson = JSONArray()
-            imageUris.forEach { uri ->
-                try {
-                    val path = copyImageToPrivate(uri, savedAt)
-                    imagesJson.put(path)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to copy draft image: ${e.message}")
+            // 事务包裹：图片复制 + DB 写入原子化
+            db.beginTransaction()
+            try {
+                // 图片路径 → JSONArray
+                val imagesJson = JSONArray()
+                imageUris.forEach { uri ->
+                    try {
+                        val path = copyImageToPrivate(uri, savedAt)
+                        imagesJson.put(path)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to copy draft image: ${e.message}")
+                    }
                 }
+
+                // Span → JSONArray
+                val spansJson = JSONArray()
+                formatSpans.forEach { spansJson.put(it.serialize()) }
+
+                db.execSQL(
+                    "INSERT INTO ${DraftDatabaseHelper.TABLE_DRAFTS} " +
+                    "(${DraftDatabaseHelper.COL_TEXT}, ${DraftDatabaseHelper.COL_IMAGES_JSON}, " +
+                    "${DraftDatabaseHelper.COL_SPANS_JSON}, ${DraftDatabaseHelper.COL_SAVED_AT}, " +
+                    "${DraftDatabaseHelper.COL_IS_TEMPORARY}) " +
+                    "VALUES (?, ?, ?, ?, ?)",
+                    arrayOf<Any>(text, imagesJson.toString(), spansJson.toString(), savedAt, if (isTemporary) 1 else 0)
+                )
+
+                // 获取自增 id
+                val idCursor = db.rawQuery("SELECT last_insert_rowid()", null)
+                val id = idCursor.use { c ->
+                    if (c.moveToFirst()) c.getLong(0) else -1L
+                }
+
+                db.setTransactionSuccessful()
+
+                val label = if (isTemporary) "临时" else "永久"
+                Log.d(TAG, "$label 草稿已保存: id=$id, text=${text.length}chars, images=${imageUris.size}")
+                return id
+            } finally {
+                db.endTransaction()
             }
-
-            // Span → JSONArray
-            val spansJson = JSONArray()
-            formatSpans.forEach { spansJson.put(it.serialize()) }
-
-            db.execSQL(
-                "INSERT INTO ${DraftDatabaseHelper.TABLE_DRAFTS} " +
-                "(${DraftDatabaseHelper.COL_TEXT}, ${DraftDatabaseHelper.COL_IMAGES_JSON}, " +
-                "${DraftDatabaseHelper.COL_SPANS_JSON}, ${DraftDatabaseHelper.COL_SAVED_AT}, " +
-                "${DraftDatabaseHelper.COL_IS_TEMPORARY}) " +
-                "VALUES (?, ?, ?, ?, ?)",
-                arrayOf<Any>(text, imagesJson.toString(), spansJson.toString(), savedAt, if (isTemporary) 1 else 0)
-            )
-
-            // 获取自增 id
-            val idCursor = db.rawQuery("SELECT last_insert_rowid()", null)
-            val id = idCursor.use { c ->
-                if (c.moveToFirst()) c.getLong(0) else -1L
-            }
-
-            val label = if (isTemporary) "临时" else "永久"
-            Log.d(TAG, "$label 草稿已保存: id=$id, text=${text.length}chars, images=${imageUris.size}")
-            return id
         } catch (e: Exception) {
             Log.w(TAG, "internalSave failed", e)
             return -1L
@@ -208,7 +216,7 @@ class DraftManager(private val context: Context) {
      * 将所有临时草稿（is_temporary=1）标记为永久。
      * onStop 调用：应用真正进入后台后，临时草稿晋升为永久草稿。
      */
-    fun markAllTemporaryPermanent() {
+    override fun markAllTemporaryPermanent() {
         try {
             val db = dbHelper.writableDatabase
             db.execSQL(
@@ -226,7 +234,7 @@ class DraftManager(private val context: Context) {
      * 删除所有临时草稿（数据库记录 + 关联图片文件）。
      * onResume 调用：用户回到应用，临时草稿不再需要。
      */
-    fun deleteAllTemporaryDrafts() {
+    override fun deleteAllTemporaryDrafts() {
         try {
             val db = dbHelper.writableDatabase
             // 先查所有临时草稿的图片 JSON
@@ -262,7 +270,7 @@ class DraftManager(private val context: Context) {
     /**
      * 删除指定草稿（数据库记录 + 关联图片文件）。
      */
-    fun deleteDraft(id: Long) {
+    override fun deleteDraft(id: Long) {
         try {
             // 先读图片路径，再删除记录
             val db = dbHelper.writableDatabase
@@ -357,58 +365,3 @@ class DraftManager(private val context: Context) {
         }
     }
 }
-
-// ========================================================================
-// 数据类
-// ========================================================================
-
-/**
- * 草稿摘要（列表项展示用）。
- */
-data class DraftSummary(
-    val id: Long,
-    val textPreview: String,
-    val textLength: Int,
-    val imageCount: Int,
-    val savedAt: Long
-) {
-    /** 摘要预览文字："128字，3张图片" */
-    fun toStatsText(): String {
-        val parts = mutableListOf<String>()
-        if (textLength > 0) parts.add("${textLength}字")
-        if (imageCount > 0) parts.add("${imageCount}张图")
-        return if (parts.isEmpty()) "空草稿" else parts.joinToString("，")
-    }
-
-    /** 相对时间（如 "3分钟前"、"昨天 14:30"） */
-    fun toRelativeTime(): String {
-        val now = System.currentTimeMillis()
-        val diff = now - savedAt
-        if (diff < 0) return "刚刚"
-
-        val minutes = diff / 60_000
-        val hours = minutes / 60
-        val days = hours / 24
-
-        return when {
-            minutes < 1 -> "刚刚"
-            minutes < 60 -> "${minutes}分钟前"
-            hours < 24 -> "${hours}小时前"
-            days < 2 -> "昨天 ${
-                SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(savedAt))
-            }"
-            days < 7 -> "${days}天前"
-            else -> SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(savedAt))
-        }
-    }
-}
-
-/**
- * 草稿完整数据（恢复用）。
- */
-data class DraftData(
-    val text: String,
-    val images: List<Uri>,
-    val formatSpans: List<SpanDescriptor>,
-    val savedAt: Long
-)
