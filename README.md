@@ -164,7 +164,7 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 | `9bcaf86` | SQLite 幽灵字段清理 + 事务包裹 `beginTransaction/endTransaction` |
 | `1fb8375` | **Day 28 大提交**：`di/domain/repository` 模块 + `DiskThumbnailCache` + `RichEditText` 封装 + `ImageCompressor` 比例自适应 + 阈值放宽 + `NineGridLayout` 接口化 |
 
-**总 Commit 数：50**（远超要求的 ≥30）
+**总 Commit 数：51**（远超要求的 ≥30）
 
 ---
 
