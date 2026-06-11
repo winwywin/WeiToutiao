@@ -56,8 +56,8 @@ flowchart TD
 
 ```
 app/src/main/java/com/example/test_micrott/
-├── models/                  # 数据模型（PublishState, PublishIntent, SpanDescriptor）
-├── data/                    # 数据层（ImageCompressor, ThumbnailCache, DraftManager, DraftDatabaseHelper）
+├── models/                  # 数据模型（PublishState, PublishIntent, SpanDescriptor, TopicItem）
+├── data/                    # 数据层（ImageCompressor, ThumbnailCache, DiskThumbnailCache, DraftManager, DraftDatabaseHelper）
 ├── views/                   # View 层（MainActivity, NineGridLayout, RichEditText, SpanWatcher, ...）
 ├── viewmodels/              # ViewModel 层（PublishViewModel）
 ├── repository/              # 仓库接口（DraftRepository）
@@ -164,7 +164,7 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 | `9bcaf86` | SQLite 幽灵字段清理 + 事务包裹 `beginTransaction/endTransaction` |
 | `1fb8375` | **Day 28 大提交**：`di/domain/repository` 模块 + `DiskThumbnailCache` + `RichEditText` 封装 + `ImageCompressor` 比例自适应 + 阈值放宽 + `NineGridLayout` 接口化 |
 
-**总 Commit 数：43**（远超要求的 ≥30）
+**总 Commit 数：45**（远超要求的 ≥30）
 
 ---
 
