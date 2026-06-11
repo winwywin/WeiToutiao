@@ -152,4 +152,4 @@ python mem_monitor.py
 - Native Heap 退出后回落 **67%**，Graphics 回落 **52%**，GC 行为正常
 - CPU 全程 **~0%**，`Dispatchers.IO` + `Semaphore(3)` 线程池解码不阻塞主线程
 - ThumbnailCache 二级缓存有效避免重复解码，热场景 L1 命中率接近 100%
-- **仍待补充**：Heap Dump 截图（Bitmap 实例数）+ CPU Profiler 轨迹截图（线程视图）
+- **仍待补充**：Heap Dump 截图（Bitmap 实例数）+ CPU Profiler 轨迹截图（线程视图）—— 需要连接 Android Studio Profiler 手动录制，当前环境无法生成
