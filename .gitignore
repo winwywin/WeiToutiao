@@ -14,5 +14,14 @@
 .cxx
 local.properties
 /.kotlin
-
+/.codegraph/
+/.understand-anything/
+/understand-anything-repo/
 nul
+jdk21/
+.env
+.npmrc
+reasonix.toml
+.gradle_home/
+.idea/codeStyles/
+.workbuddy/
