@@ -39,12 +39,11 @@ class ImagePreviewActivity : AppCompatActivity() {
         const val TAG = "ImagePreview"
         const val EXTRA_URI_LIST = "extra_uri_list"
         const val EXTRA_POSITION = "extra_position"
-        // 大图预览的目标尺寸：屏幕宽度典型值
-        const val PREVIEW_TARGET_SIZE = 1080
     }
 
     private val imageUris = mutableListOf<Uri>()
     private var currentPosition = 0
+    private var previewTargetSize = 1080  // 默认值，onCreate 中用屏幕宽度覆盖
     private lateinit var viewPager: ViewPager2
     private lateinit var adapter: PreviewAdapter
 
@@ -54,6 +53,10 @@ class ImagePreviewActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_image_preview)
+
+        // 用屏幕实际宽度作为预览目标尺寸（2K/4K 屏不会糊）
+        previewTargetSize = resources.displayMetrics.widthPixels
+        Log.d(TAG, "预览目标尺寸: ${previewTargetSize}px (屏幕宽度)")
 
         parseIntent()
         initViews()
@@ -83,7 +86,7 @@ class ImagePreviewActivity : AppCompatActivity() {
 
         // ViewPager2
         viewPager = findViewById(R.id.vp_preview)
-        adapter = PreviewAdapter(imageUris, previewScope)
+        adapter = PreviewAdapter(imageUris, previewScope, previewTargetSize)
         viewPager.adapter = adapter
 
         // 懒加载：只预加载当前页前后各 1 页
@@ -114,6 +117,7 @@ class ImagePreviewActivity : AppCompatActivity() {
     private class PreviewAdapter(
         private val uris: List<Uri>,
         private val scope: CoroutineScope,
+        private val targetSize: Int,
     ) : RecyclerView.Adapter<PreviewViewHolder>() {
 
         override fun getItemCount(): Int = uris.size
@@ -125,7 +129,7 @@ class ImagePreviewActivity : AppCompatActivity() {
         }
 
         override fun onBindViewHolder(holder: PreviewViewHolder, position: Int) {
-            holder.bind(uris[position], scope)
+            holder.bind(uris[position], scope, targetSize)
         }
 
         override fun onViewRecycled(holder: PreviewViewHolder) {
@@ -142,7 +146,7 @@ class ImagePreviewActivity : AppCompatActivity() {
         private var loadJob: Job? = null
         private var boundPosition = RecyclerView.NO_POSITION
 
-        fun bind(uri: Uri, scope: CoroutineScope) {
+        fun bind(uri: Uri, scope: CoroutineScope, targetSize: Int) {
             loadJob?.cancel()
 
             boundPosition = adapterPosition
@@ -160,8 +164,8 @@ class ImagePreviewActivity : AppCompatActivity() {
                 val bitmap = withContext(Dispatchers.IO) {
                     ImageCompressor.decodeSampledBitmap(
                         context, uri,
-                        targetWidth = PREVIEW_TARGET_SIZE,
-                        targetHeight = PREVIEW_TARGET_SIZE
+                        targetWidth = targetSize,
+                        targetHeight = targetSize
                     )
                 }
                 if (bitmap != null) {

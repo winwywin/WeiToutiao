@@ -92,7 +92,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="\# 话题"
+            android:text="@string/wtt_bar_topic"
             android:textColor="#2A62FF"
             android:textStyle="bold" />
         <TextView
@@ -101,7 +101,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="\@ 提及"
+            android:text="@string/wtt_bar_mention"
             android:textColor="#555555" />
         <TextView
             android:id="@+id/barEmoji"
@@ -109,7 +109,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="☺ 表情"
+            android:text="@string/wtt_bar_emoji"
             android:textColor="#555555" />
         <TextView
             android:id="@+id/barPhoto"
@@ -117,7 +117,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="📷 照片"
+            android:text="@string/wtt_bar_photo"
             android:textColor="#555555" />
     </LinearLayout>
 

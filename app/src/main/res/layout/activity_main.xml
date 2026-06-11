@@ -6,8 +6,10 @@
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:layout_marginTop="?android:attr/actionBarSize"
     android:background="#FFFFFF"
-    tools:context=".view.MainActivity">
+    android:fitsSystemWindows="true"
+    tools:context=".views.MainActivity">
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
@@ -88,7 +90,7 @@
                 android:orientation="vertical"
                 android:paddingBottom="15dp">
 
-                <EditText
+                <com.example.test_micrott.views.RichEditText
                     android:id="@+id/ktg"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -97,7 +99,10 @@
                     android:background="@null"
                     android:gravity="top|start"
                     android:hint="@string/wtt_hint_input"
-                    android:inputType="textMultiLine" />
+                    android:textColor="#333333"
+                    android:inputType="textMultiLine"
+                    android:autofillHints="text"
+                    tools:ignore="TextFieldSize" />
 
                 <!-- Day 17+: 字数统计 -->
                 <TextView
@@ -109,7 +114,7 @@
                     android:paddingBottom="4dp"
                     android:text="@string/wtt_char_count_placeholder"
                     android:textSize="12sp"
-                    android:textColor="#999999" />
+                    android:textColor="#757575" />
 
                 <!-- A9 自定义九宫格 ViewGroup — 完全自实现 onMeasure/onLayout -->
                 <com.example.test_micrott.views.NineGridLayout
@@ -140,7 +145,7 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="B"
+                android:text="@string/wtt_fmt_bold"
                 android:textStyle="bold"
                 android:textSize="16sp"
                 android:textColor="#555555"
@@ -152,7 +157,7 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="I"
+                android:text="@string/wtt_fmt_italic"
                 android:textStyle="italic"
                 android:textSize="16sp"
                 android:textColor="#555555"
@@ -164,10 +169,11 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="A"
+                android:text="@string/wtt_fmt_color"
                 android:textSize="16sp"
                 android:textColor="#555555"
                 android:background="?attr/selectableItemBackground" />
+
         </LinearLayout>
 
         <!-- 底部工具栏 -->
@@ -187,7 +193,7 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="# 话题"
+                android:text="@string/wtt_bar_topic"
                 android:textColor="#2A62FF"
                 android:textStyle="bold" />
 
@@ -197,7 +203,7 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="@ 提及"
+                android:text="@string/wtt_bar_mention"
                 android:textColor="#555555" />
 
             <TextView
@@ -206,7 +212,7 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="☺ 表情"
+                android:text="@string/wtt_bar_emoji"
                 android:textColor="#555555" />
 
             <TextView
@@ -215,7 +221,7 @@
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="📷 照片"
+                android:text="@string/wtt_bar_photo"
                 android:textColor="#555555" />
         </LinearLayout>
 
@@ -235,7 +241,7 @@
             android:id="@+id/tv_upload_status"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="准备发布..."
+            android:text="@string/wtt_upload_preparing"
             android:textSize="15sp"
             android:textColor="#333333"
             android:layout_marginBottom="16dp" />
@@ -254,7 +260,7 @@
             android:id="@+id/tv_upload_percent"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="0%"
+            android:text="@string/wtt_upload_percent_zero"
             android:textSize="13sp"
             android:textColor="#888888"
             android:layout_marginTop="8dp" />
@@ -278,7 +284,7 @@
             android:layout_width="72dp"
             android:layout_height="72dp"
             android:gravity="center"
-            android:text="✓"
+            android:text="@string/wtt_success_check"
             android:textSize="36sp"
             android:textColor="#FFFFFF"
             android:background="@drawable/success_circle_bg"
@@ -331,10 +337,12 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center"
-            android:paddingHorizontal="32dp">
+            android:paddingHorizontal="32dp"
+            style="?android:attr/buttonBarStyle">
 
             <Button
                 android:id="@+id/btn_success_continue"
+                style="?android:attr/buttonBarButtonStyle"
                 android:layout_width="0dp"
                 android:layout_height="44dp"
                 android:layout_weight="1"
@@ -346,6 +354,7 @@
 
             <Button
                 android:id="@+id/btn_success_back"
+                style="?android:attr/buttonBarButtonStyle"
                 android:layout_width="0dp"
                 android:layout_height="44dp"
                 android:layout_weight="1"
@@ -358,3 +367,4 @@
     </LinearLayout>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
+

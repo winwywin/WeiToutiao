@@ -190,7 +190,7 @@ class ImageGridAdapter(
                     withContext(Dispatchers.IO) {
                         ImageCompressor.decodeSampledBitmap(
                             holder.itemView.context, uri,
-                            targetWidth = 800, targetHeight = 800
+                            targetWidth = 400, targetHeight = 400
                         )
                     }
                 }

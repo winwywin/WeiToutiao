@@ -4,6 +4,8 @@ import android.app.Application
 import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.SavedStateHandle
 import com.example.test_micrott.models.PublishIntent
 import com.example.test_micrott.models.PublishState
@@ -14,12 +16,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import androidx.lifecycle.viewModelScope
 import com.example.test_micrott.models.UploadStatus
-import com.example.test_micrott.data.DraftManager
 import com.example.test_micrott.data.ImageCompressor
+import com.example.test_micrott.di.App
+import com.example.test_micrott.repository.DraftRepository
 import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Job
 
 /**
  * 核心调度大脑 - PublishViewModel (MVI-MVVM 融合架构核心)
@@ -27,14 +31,14 @@ import kotlinx.coroutines.withContext
  * 1. 唯一持有并驱动全场唯一的 PublishState。
  * 2. 接收来自 View 层的单向 Intent 指令，进行闭环业务演算。
  *
- * Day 6 升级：接入 SavedStateHandle，旋转屏幕 / 进程销毁后状态100%恢复。
+ * Day 6 升级：接入 SavedStateHandle，进程销毁后状态100%恢复。
  * Day 17 升级：继承 AndroidViewModel（需要 Context 获取 cacheDir 压缩图片）。
  *             handleClickPublish 改为分步发布：压缩 → 上传 → 完成。
  */
 class PublishViewModel(
     application: Application,
     private val savedStateHandle: SavedStateHandle
-) : AndroidViewModel(application) {
+) : AndroidViewModel(application), DefaultLifecycleObserver {
 
     companion object {
         // SavedStateHandle 存储键
@@ -47,16 +51,20 @@ class PublishViewModel(
     }
 
     // 🛡️ 防护隔离防线：对内私有可变，严禁外部直接 `.value = ...` 篡改账本
-    // Day 6 升级：初始化时从 SavedStateHandle 恢复（旋转后重建场景）
+    // Day 6 升级：初始化时从 SavedStateHandle 恢复（进程销毁后重建场景）
     private val _state = MutableStateFlow(restoreState())
 
     // 📺 对外只读暴露：View 层（Activity）只能单向 collect 监听这个流
     val state: StateFlow<PublishState> = _state.asStateFlow()
 
+    // 话题选择器显隐：独立于主状态，SavedStateHandle 状态持久化
+    val showTopicPicker: StateFlow<Boolean> =
+        savedStateHandle.getStateFlow("showTopicPicker", false)
+
     private val tag = "MVI_FRAMEWORK"
 
-    // Day 22+：草稿管理器
-    private val draftManager = DraftManager(getApplication())
+    // Day 22+：草稿管理器（通过 DI 容器获取，避免 ViewModel 直接 new Data 层实现）
+    private val draftManager: DraftRepository = (getApplication<Application>() as App).container.draftRepository
 
     /**
      * 退出行为的显式标记。
@@ -71,6 +79,19 @@ class PublishViewModel(
      */
     private var launchingInternalActivity = false
 
+    /**
+     * 防抖保存 Job，用于在 onResume 时等待 onPause 的保存协程完成后再删除，
+     * 消除 saveTemporaryDraft 与 deleteAllTemporaryDrafts 的竞态条件。
+     */
+    private var saveJob: Job? = null
+
+    /**
+     * 当前编辑器内容来源的草稿 id。
+     * 从草稿箱恢复后设为该草稿 id，退出保存时传给 saveDraft 做 UPDATE 而非 INSERT，
+     * 避免草稿箱中出现重复记录。全新编写时为 null。
+     */
+    private var restoredDraftId: Long? = null
+
     init {
         // 不再在 init 检查草稿 — 用户通过标题栏「草稿箱」按钮主动进入草稿列表页
     }
@@ -81,7 +102,6 @@ class PublishViewModel(
 
     /**
      * 从 SavedStateHandle 恢复上次的 UI 状态。
-     * 旋转屏幕 / 进程销毁后，SavedStateHandle 会自动反序列化 Bundle 中的数据。
      */
     private fun restoreState(): PublishState {
         val savedText = savedStateHandle.get<String>(KEY_TEXT) ?: ""
@@ -109,7 +129,6 @@ class PublishViewModel(
 
     /**
      * 每次状态变更后，将关键字段同步写入 SavedStateHandle。
-     * SavedStateHandle 内部自动处理进程死亡序列化，配置变更（旋转）时数据天然存活。
      */
     private fun persistState(state: PublishState) {
         savedStateHandle[KEY_TEXT] = state.text
@@ -132,24 +151,33 @@ class PublishViewModel(
 
         // 利用 sealed class 的完备性强制分支检查，漏写任何一个意图直接编译报错
         when (intent) {
-            is PublishIntent.TextChanged -> handleTextChanged(intent.text)
-            is PublishIntent.ImagesPicked -> handleImagesPicked(intent.uris)
-            is PublishIntent.RemoveImage -> handleRemoveImage(intent.index)
-            is PublishIntent.ClickPublish -> handleClickPublish()
-            is PublishIntent.InsertTopic -> handleInsertTopic(intent.topicText)
-            is PublishIntent.MoveImage -> handleMoveImage(intent.from, intent.to)
-            is PublishIntent.ReorderImages -> handleReorderImages(intent.uris)
-            is PublishIntent.InsertMention -> handleInsertMention(intent.mentionText)
-            is PublishIntent.SaveFormattingSpans -> handleSaveFormatting(intent.descriptors)
-            is PublishIntent.DismissSuccess -> handleDismissSuccess()
-            is PublishIntent.EditorTouched -> handleEditorTouched()
-            is PublishIntent.OpenDraftBox -> handleOpenDraftBox()
-            is PublishIntent.RestoreDraft -> handleRestoreDraft(intent.id)
-            is PublishIntent.ConfirmSaveAndExit -> handleConfirmSaveAndExit()
-            is PublishIntent.ConfirmDiscardAndExit -> handleConfirmDiscardAndExit()
-            is PublishIntent.ShowTopicPicker -> handleShowTopicPicker()
-            is PublishIntent.HideTopicPicker -> handleHideTopicPicker()
-            is PublishIntent.SelectTopic -> handleSelectTopic(intent.topicName)
+            // Text
+            is PublishIntent.Text.TextChanged -> handleTextChanged(intent.text)
+            is PublishIntent.Text.InsertTopic -> handleInsertTopic(intent.topicText)
+            is PublishIntent.Text.InsertMention -> handleInsertMention(intent.mentionText)
+            is PublishIntent.Text.SaveFormattingSpans -> handleSaveFormatting(intent.descriptors)
+            is PublishIntent.Text.SelectTopic -> handleSelectTopic(intent.topicName)
+            is PublishIntent.Text.EditorTouched -> handleEditorTouched()
+
+            // Image
+            is PublishIntent.Image.ImagesPicked -> handleImagesPicked(intent.uris)
+            is PublishIntent.Image.RemoveImage -> handleRemoveImage(intent.index)
+            is PublishIntent.Image.ReorderImages -> handleReorderImages(intent.uris)
+
+            // Publish
+            is PublishIntent.Publish.ClickPublish -> handleClickPublish()
+            is PublishIntent.Publish.DismissSuccess -> handleDismissSuccess()
+
+            // Draft
+            is PublishIntent.Draft.OpenDraftBox -> handleOpenDraftBox()
+            is PublishIntent.Draft.RestoreDraft -> handleRestoreDraft(intent.id)
+            is PublishIntent.Draft.ConfirmSaveAndExit -> handleConfirmSaveAndExit()
+            is PublishIntent.Draft.ConfirmDiscardAndExit -> handleConfirmDiscardAndExit()
+
+            // Internal
+            is PublishIntent.Internal.LaunchInternalActivity -> handleLaunchInternalActivity()
+            is PublishIntent.Internal.ShowTopicPicker -> handleShowTopicPicker()
+            is PublishIntent.Internal.HideTopicPicker -> handleHideTopicPicker()
         }
     }
 
@@ -162,7 +190,6 @@ class PublishViewModel(
      *
      * Day 8 优化：【修复打字卡顿】TextChanged 不再调用 persistState。
      * 每键写入 SavedStateHandle（Bundle 序列化）是高频打字的性能杀手。
-     * 文本持久化依赖 Activity.onSaveInstanceState 即可覆盖旋转/进程死亡场景。
      */
     private fun handleTextChanged(newText: String) {
         if (_state.value.text == newText) return
@@ -241,7 +268,8 @@ class PublishViewModel(
      * 处理点击发布按钮意图
      *
      * Day 17 重构：分步发布流程
-     *   Step 1 — 压缩：逐张图片调用 ImageCompressor.compressToFile，
+     *   Step 1 — 压缩：逐张图片调用 ImageCompressor 解码 + JPEG 压缩，
+     *            解码目标尺寸 1080px（长边），JPEG 质量 [DraftManager.THUMBNAIL_JPEG_QUALITY]，
      *            进度推进 0→50%，输出 UploadStatus.Compressing(current, total)
      *   Step 2 — 上传：模拟逐张上传（delay 600ms/张），
      *            进度推进 50→100%，输出 UploadStatus.Uploading(current, total)
@@ -291,23 +319,37 @@ class PublishViewModel(
                         )
                     )
 
-                    val compressedFile = withContext(Dispatchers.IO) {
+                    val copiedFile = withContext(Dispatchers.IO) {
                         try {
-                            val bitmap = ImageCompressor.decodeSampledBitmap(
-                                ctx, uri,
-                                targetWidth = 1920, targetHeight = 1920
-                            )
+                            // 解码下采样 Bitmap（长边 ≤ 1080px）+ JPEG 压缩输出
+                            val bitmap = ImageCompressor.decodeSampledBitmap(ctx, uri, 1080, 1080)
                             if (bitmap != null) {
                                 val outFile = File(compressDir, "img_${System.currentTimeMillis()}_$index.jpg")
-                                ImageCompressor.compressToFile(bitmap, outFile, quality = 85)
-                            } else null
+                                ImageCompressor.compressToFile(bitmap, outFile)
+                                bitmap.recycle()
+
+                                // 记录原始 vs 压缩后大小，用于性能对比
+                                val originalSize = try {
+                                    ctx.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: -1L
+                                } catch (_: Exception) { -1L }
+                                val compressedSize = outFile.length()
+                                val ratio = if (originalSize > 0) originalSize / compressedSize else -1L
+                                Log.i(tag, "📐 [ViewModel] 图片压缩 ${index + 1}/$totalImages: " +
+                                    "原始=${if (originalSize > 0) "${originalSize / 1024}KB" else "?"} → " +
+                                    "压缩=${compressedSize / 1024}KB (${ratio}x)")
+
+                                if (outFile.exists() && outFile.length() > 0) outFile else null
+                            } else {
+                                Log.w(tag, "⚠️ [ViewModel] 图片解码失败 index=$index")
+                                null
+                            }
                         } catch (e: Exception) {
                             Log.w(tag, "⚠️ [ViewModel] 图片压缩失败 index=$index: ${e.message}")
                             null
                         }
                     }
-                    compressedFile?.let { compressedFiles.add(it) }
-                    Log.d(tag, "🗜️ [ViewModel] 压缩完成 ${index + 1}/$totalImages，文件=${compressedFile?.name}")
+                    copiedFile?.let { compressedFiles.add(it) }
+                    Log.d(tag, "📋 [ViewModel] 图片压缩完成 ${index + 1}/$totalImages，文件=${copiedFile?.name}，大小=${copiedFile?.length()?.div(1024)}KB")
                 }
             }
 
@@ -355,52 +397,79 @@ class PublishViewModel(
     }
 
     /**
-     * 用户关闭发布成功页 → 重置为编辑模式（空表单）
+     * 用户关闭发布成功页 → 重置为编辑模式（空表单）。
+     * 如果是从草稿恢复后发布的，删除原草稿（已发布，不再需要）。
      */
     private fun handleDismissSuccess() {
+        val draftIdToDelete = restoredDraftId
+        restoredDraftId = null
+
         val resetState = PublishState()
         _state.value = resetState
         persistState(resetState)
+
+        // 发布成功后删除原草稿（已消费，避免草稿箱残留重复项）
+        if (draftIdToDelete != null) {
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) {
+                    draftManager.deleteDraft(draftIdToDelete)
+                }
+                Log.d(tag, "🗑️ [ViewModel] 已发布，删除原草稿 id=$draftIdToDelete")
+            }
+        }
+
         Log.d(tag, "📝 [ViewModel] 成功页已关闭，表单已重置")
     }
 
     /**
-     * 处理插入话题标签意图
+     * 处理插入话题标签意图。
      *
-     * Day 6 修复：View 层的 insertTopicIntoEditor 已直接修改 EditText 文本，
-     * doAfterTextChanged 会自动触发 TextChanged 将完整文本同步过来。
-     * 因此此处不再追加文本（避免重复插入），仅确保发布按钮亮起。
+     * View 层 insertTopicIntoEditor() 已直接操作 Editable（保留已有富文本格式），
+     * doAfterTextChanged 在 replace() 期间同步触发 TextChanged → state.text 已精确。
+     *
+     * 此处仅做字数/按钮状态更新 + 持久化，**不修改 state.text**。
+     * 旧代码的"追加估算"假设话题总是插在末尾，Day 24 改为任意位置插入后不再成立。
      */
-    private fun handleInsertTopic(topicText: String) {
-        if (!_state.value.isPublishButtonEnabled) {
-            val newState = _state.value.copy(isPublishButtonEnabled = true)
-            _state.value = newState
-            persistState(newState)
-        }
-        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [InsertTopic] -> 话题: $topicText（文本由TextChanged同步）")
+    private fun handleInsertTopic(@Suppress("UNUSED_PARAMETER") topicText: String) {
+        val charCount = _state.value.text.length
+        val isExceeded = charCount > PublishState.MAX_CHAR_LIMIT
+
+        val newState = _state.value.copy(
+            isPublishButtonEnabled = !isExceeded,
+            charCount = charCount,
+            isCharLimitExceeded = isExceeded,
+        )
+        _state.value = newState
+        persistState(newState)
+        Log.d(tag, "📺 [ViewModel] InsertTopic → charCount=$charCount (文本由 TextChanged 精确同步)")
     }
 
     /**
-     * 处理插入 @提及 意图
+     * 处理插入 @提及 意图。
      *
-     * 与 InsertTopic 同理：View 层直接修改 EditText 文本，
-     * doAfterTextChanged 会触发 TextChanged 同步完整文本，
-     * 此处仅确保发布按钮亮起。
+     * View 层 insertMentionIntoEditor() 已直接操作 Editable，
+     * doAfterTextChanged 同步触发 TextChanged → state.text 已精确。
+     *
+     * 此处仅做字数/按钮状态更新 + 持久化，**不修改 state.text**。
      */
-    private fun handleInsertMention(mentionText: String) {
-        if (!_state.value.isPublishButtonEnabled) {
-            val newState = _state.value.copy(isPublishButtonEnabled = true)
-            _state.value = newState
-            persistState(newState)
-        }
-        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [InsertMention] -> @$mentionText（文本由TextChanged同步）")
+    private fun handleInsertMention(@Suppress("UNUSED_PARAMETER") mentionText: String) {
+        val charCount = _state.value.text.length
+        val isExceeded = charCount > PublishState.MAX_CHAR_LIMIT
+
+        val newState = _state.value.copy(
+            isPublishButtonEnabled = !isExceeded,
+            charCount = charCount,
+            isCharLimitExceeded = isExceeded,
+        )
+        _state.value = newState
+        persistState(newState)
+        Log.d(tag, "📺 [ViewModel] InsertMention → charCount=$charCount (文本由 TextChanged 精确同步)")
     }
 
     /**
      * 处理保存格式化 Span 描述符意图
      *
-     * 格式化操作是纯 View 层行为，此处仅接收 Span 描述符并持久化到 SavedStateHandle，
-     * 确保旋转屏幕后格式化状态不丢失。
+     * 格式化操作是纯 View 层行为，此处仅接收 Span 描述符并持久化到 SavedStateHandle。
      */
     private fun handleSaveFormatting(descriptors: List<SpanDescriptor>) {
         val newState = _state.value.copy(formatSpanDescriptors = descriptors)
@@ -410,25 +479,8 @@ class PublishViewModel(
     }
 
     /**
-     * 处理拖拽排序意图：交换列表中两个位置的图片
-     */
-    private fun handleMoveImage(from: Int, to: Int) {
-        val currentImages = _state.value.selectedImages.toMutableList()
-        if ((from !in currentImages.indices) || (to !in currentImages.indices)) return
-        if (from == to) return
-
-        val moved = currentImages.removeAt(from)
-        currentImages.add(to, moved)
-
-        val newState = _state.value.copy(selectedImages = currentImages)
-        _state.value = newState
-        persistState(newState)
-
-        Log.d(tag, "📺 [ViewModel] 状态增量演算完成 [MoveImage] -> $from ↔ $to")
-    }
-
-    /**
-     * 拖拽松手后提交完整最终顺序（替代逐帧 MoveImage）
+     * 拖拽松手后提交完整最终顺序（替代已废弃的逐帧 MoveImage）。
+     * 由 NineGridLayout.onReorder 回传完整列表，原子提交避免双写。
      */
     private fun handleReorderImages(uris: List<Uri>) {
         if (uris.size != _state.value.selectedImages.size) {
@@ -455,10 +507,13 @@ class PublishViewModel(
     }
 
     /**
-     * 用户点击草稿箱按钮 → View 层直接跳 DraftListActivity，无状态变更。
+     * 用户点击草稿箱按钮 → 设置内部跳转标记，通知 View 层跳转。
+     *
+     * 草稿保存由 onPause 统一负责（始终保存），此处仅设置标记防止 onStop 误升级。
      */
     private fun handleOpenDraftBox() {
-        Log.d(tag, "📋 [ViewModel] 草稿箱按钮（View 层处理跳转）")
+        launchingInternalActivity = true
+        Log.d(tag, "📋 [ViewModel] 草稿箱按钮 → 内部跳转标记已设置（保存由 onPause 负责）")
     }
 
     /**
@@ -466,9 +521,7 @@ class PublishViewModel(
      */
     private fun handleRestoreDraft(draftId: Long) {
         viewModelScope.launch {
-            val draft = withContext(Dispatchers.IO) {
-                draftManager.getDraft(draftId)
-            }
+            val draft = draftManager.getDraft(draftId)
             if (draft == null) {
                 Log.w(tag, "⚠️ [ViewModel] 草稿 id=$draftId 加载失败")
                 return@launch
@@ -489,6 +542,7 @@ class PublishViewModel(
             )
             _state.value = restoredState
             persistState(restoredState)
+            restoredDraftId = draftId
 
             Log.d(tag, "📋 [ViewModel] 草稿 id=$draftId 已恢复: text=${draft.text.length}字, images=${draft.images.size}张")
         }
@@ -496,8 +550,8 @@ class PublishViewModel(
 
     /**
      * 退出弹窗 — 用户点击「保存」。
-     * 直接存永久草稿，设置 explicitExitAction = Save，
-     * 确保后续 onPause 不再重复保存临时草稿。
+     * 异步存永久草稿，保存完成后才设置 explicitExitAction 和 shouldFinish，
+     * 确保 finish() 在草稿落盘之后执行，避免 viewModelScope 被取消导致保存中断。
      */
     private fun handleConfirmSaveAndExit() {
         val s = _state.value
@@ -506,10 +560,17 @@ class PublishViewModel(
             return
         }
         viewModelScope.launch {
-            val id = draftManager.saveDraft(s.text, s.selectedImages, s.formatSpanDescriptors)
-            Log.d(tag, "💾 [ViewModel] 用户主动保存草稿 id=$id")
+            val id = draftManager.saveDraft(
+                s.text, s.selectedImages, s.formatSpanDescriptors,
+                updateDraftId = restoredDraftId
+            )
+            val action = if (restoredDraftId != null) "更新" else "新建"
+            Log.d(tag, "💾 [ViewModel] 用户主动保存草稿 id=$id ($action)")
+            restoredDraftId = null
+            // 保存落盘完成后，才设置退出标记 + 通知 View 层 finish()
+            explicitExitAction = ExitAction.Save
+            _state.value = _state.value.copy(shouldFinish = true)
         }
-        explicitExitAction = ExitAction.Save
     }
 
     /**
@@ -518,26 +579,27 @@ class PublishViewModel(
      */
     private fun handleConfirmDiscardAndExit() {
         explicitExitAction = ExitAction.Discard
+        restoredDraftId = null  // 清空：用户选择不保存，不应再更新原草稿
         Log.d(tag, "🗑️ [ViewModel] 用户选择不保存草稿")
     }
 
-    /**
-     * 是否有需要保存的内容（供 Activity 判断是否弹出退出确认框）。
-     */
-    fun hasContent(): Boolean {
-        val s = _state.value
-        return s.text.isNotBlank() || s.selectedImages.isNotEmpty()
-    }
-
     // ========================================================================
-    // 防抖草稿：生命周期驱动（由 Activity 调用，不通过 Intent）
+    // DefaultLifecycleObserver：生命周期驱动（不再依赖 Activity 发 Intent）
     // ========================================================================
 
     /**
-     * onPause → 保存临时草稿（is_temporary=1）。
+     * onPause → 保存草稿。
      * 如果用户刚通过退出弹窗明确选择了保存/不保存，则跳过。
+     *
+     * 分支策略：
+     * - restoredDraftId != null（已加载过草稿）→ 直接 UPDATE 原草稿，避免重复
+     * - restoredDraftId == null（全新编写）→ 保存临时草稿（防抖机制）
+     *
+     * 统一保存点：无论是因为跳转内部 Activity、按 Home 键、还是接电话，
+     * 只要当前有内容且非显式退出，就落盘。
+     * 启动异步保存 Job 并记录引用，onStop/onResume 通过 join() 等待其完成。
      */
-    fun onActivityPause() {
+    override fun onPause(owner: LifecycleOwner) {
         // 用户通过退出弹窗做了明确选择 → 不重复保存
         if (explicitExitAction != null) {
             Log.d(tag, "💾 [ViewModel] onPause 跳过（显式退出: $explicitExitAction），清除标记")
@@ -547,19 +609,32 @@ class PublishViewModel(
 
         val s = _state.value
         if (s.text.isBlank() && s.selectedImages.isEmpty()) return
-        if (s.publishSuccess) return // 发布成功页不保存草稿
+        if (s.publishSuccess) return
 
-        viewModelScope.launch {
-            draftManager.saveTemporaryDraft(s.text, s.selectedImages, s.formatSpanDescriptors)
-            Log.d(tag, "💾 [ViewModel] onPause → 临时草稿已保存")
+        saveJob = viewModelScope.launch {
+            if (restoredDraftId != null) {
+                // 已加载草稿 → 直接更新原草稿，不创建临时副本，避免重复
+                draftManager.saveDraft(
+                    s.text, s.selectedImages, s.formatSpanDescriptors,
+                    updateDraftId = restoredDraftId
+                )
+                Log.d(tag, "💾 [ViewModel] onPause → 已更新原草稿 id=$restoredDraftId (覆盖式保存)")
+            } else {
+                // 全新编写 → 保存临时草稿（防抖机制）
+                draftManager.saveTemporaryDraft(s.text, s.selectedImages, s.formatSpanDescriptors)
+                Log.d(tag, "💾 [ViewModel] onPause → 临时草稿已保存 (internalActivity=$launchingInternalActivity)")
+            }
         }
     }
 
     /**
      * onResume → 删除所有临时草稿（用户回来了，数据没丢）。
+     * 如果 onPause 的保存协程尚未完成，等待其结束再删除，
+     * 消除竞态条件。
      */
-    fun onActivityResume() {
+    override fun onResume(owner: LifecycleOwner) {
         viewModelScope.launch {
+            saveJob?.join()  // 等待 onPause 保存完成
             draftManager.deleteAllTemporaryDrafts()
             Log.d(tag, "🗑️ [ViewModel] onResume → 临时草稿已清理")
         }
@@ -568,24 +643,32 @@ class PublishViewModel(
     /**
      * onStop → 将所有临时草稿升级为永久草稿（用户真的离开了）。
      * 但如果是因为启动内部 Activity（草稿箱/大图预览），则跳过升级。
+     *
+     * 当 restoredDraftId != null 时，onPause 已直接更新原草稿，
+     * 没有创建临时草稿，因此无需升级（调用也是 no-op，但跳过可减少无用 IO）。
      */
-    fun onActivityStop() {
+    override fun onStop(owner: LifecycleOwner) {
         if (launchingInternalActivity) {
             launchingInternalActivity = false
             Log.d(tag, "📌 [ViewModel] onStop 跳过升级（启动内部 Activity）")
             return
         }
+        // 已加载草稿时，onPause 已直接更新原草稿，无临时草稿需要升级
+        if (restoredDraftId != null) {
+            Log.d(tag, "📌 [ViewModel] onStop 跳过升级（已加载草稿，onPause 已直接更新原草稿）")
+            return
+        }
         viewModelScope.launch {
+            saveJob?.join()  // 等待 onPause 保存完成，消除 save-vs-promote 竞态
             draftManager.markAllTemporaryPermanent()
-            Log.d(tag, "📌 [ViewModel] onStop → 临时草稿已升级为永久")
+            Log.d(tag, "📌 [ViewModel] onStop → 临时草稿已升级为永久 (saveJob waited)")
         }
     }
 
     /**
-     * 通知 ViewModel：即将启动 App 内部 Activity。
-     * Activity 在 startActivity 之前调用，用于防止 onStop 误升级临时草稿。
+     * 即将启动 App 内部 Activity，设置标记防止 onStop 误升级临时草稿。
      */
-    fun notifyInternalActivityLaunch() {
+    private fun handleLaunchInternalActivity() {
         launchingInternalActivity = true
     }
 
@@ -596,24 +679,35 @@ class PublishViewModel(
     private fun handleShowTopicPicker() {
         // 每次打开话题选择器时 shuffle 话题列表，模拟"刷新"效果
         val shuffled = _state.value.hotTopics.shuffled()
-        _state.value = _state.value.copy(
-            showTopicPicker = true,
-            hotTopics = shuffled,
-        )
+        _state.value = _state.value.copy(hotTopics = shuffled)
+        savedStateHandle["showTopicPicker"] = true
         Log.d(tag, "📋 [ViewModel] 话题选择器已打开: ${shuffled.size} 个话题")
     }
 
     private fun handleHideTopicPicker() {
-        _state.value = _state.value.copy(showTopicPicker = false)
+        savedStateHandle["showTopicPicker"] = false
         Log.d(tag, "📋 [ViewModel] 话题选择器已关闭")
     }
 
     /**
-     * 用户选中某个话题 → 复用现有的 InsertTopic 逻辑，将完整话题标签插入文本。
+     * 用户选中某个话题 → 关闭选择器。
+     *
+     * View 层 insertTopicIntoEditor() 已直接操作 Editable，
+     * doAfterTextChanged 同步触发 TextChanged → state.text 已精确。
+     *
+     * 此处仅关闭选择器 + 字数/按钮状态更新 + 持久化，**不修改 state.text**。
      */
-    private fun handleSelectTopic(topicName: String) {
-        val topicText = " #$topicName# "
-        handleInsertTopic(topicText)
-        Log.d(tag, "📋 [ViewModel] 用户选中话题: $topicName")
+    private fun handleSelectTopic(@Suppress("UNUSED_PARAMETER") topicName: String) {
+        val charCount = _state.value.text.length
+        val isExceeded = charCount > PublishState.MAX_CHAR_LIMIT
+
+        _state.value = _state.value.copy(
+            isPublishButtonEnabled = !isExceeded,
+            charCount = charCount,
+            isCharLimitExceeded = isExceeded,
+        )
+        savedStateHandle["showTopicPicker"] = false
+        persistState(_state.value)
+        Log.d(tag, "📋 [ViewModel] SelectTopic → charCount=$charCount (文本由 TextChanged 精确同步)")
     }
 }

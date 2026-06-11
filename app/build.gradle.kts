@@ -99,4 +99,9 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+
+    // ========================================================================
+    // LeakCanary：运行时内存泄漏自动检测（仅 debug 构建包含）
+    // ========================================================================
+    debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
 }

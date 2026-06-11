@@ -52,23 +52,49 @@ object ImageCompressor {
         val uriSegment = uri.lastPathSegment ?: "?"
 
         // ── API 29+: 使用系统硬件加速缩略图（MediaStore 预缓存，<10ms/张） ──
+        // Day 28 修复：先读原图尺寸计算比例自适应的目标尺寸，避免 loadThumbnail 被 hint 为
+        // 正方形导致部分 ROM 裁剪/拉伸非 1:1 图片，确保 publish_ratio 按原图比例自适应
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
-                val bitmap = context.contentResolver.loadThumbnail(
-                    uri, Size(targetWidth, targetHeight), null
-                )
+                // 先读尺寸（仅 bounds，不分配像素）
+                val probeOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                val probeFd = context.contentResolver.openFileDescriptor(uri, "r")
+                if (probeFd != null) {
+                    BitmapFactory.decodeFileDescriptor(probeFd.fileDescriptor, null, probeOptions)
+                    probeFd.close()
+                }
+                val rawW = probeOptions.outWidth
+                val rawH = probeOptions.outHeight
+
+                // 按原图比例计算自适应目标尺寸（等比缩放到 targetWidth×targetHeight 内）
+                val adaptedSize = if (rawW > 0 && rawH > 0) {
+                    adaptTargetSize(rawW, rawH, targetWidth, targetHeight)
+                } else {
+                    Size(targetWidth, targetHeight) // fallback: 保持原 hint
+                }
+
+                val bitmap = context.contentResolver.loadThumbnail(uri, adaptedSize, null)
                 if (bitmap.width > 0 && bitmap.height > 0) {
+                    // 比例守卫：部分 ROM 的 loadThumbnail 会忽略 Size hint 的比例，
+                    // 强制返回正方形 Bitmap，导致非 1:1 图片被拉伸/裁切。
+                    // 检测：如果返回的 Bitmap 宽高比与原图差异 > 20%，视为 ROM 篡改比例，回退手动解码
+                    val originalRatio = rawW.toFloat() / rawH.toFloat()
+                    val bitmapRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+                    val ratioDiff = kotlin.math.abs(originalRatio - bitmapRatio) / maxOf(originalRatio, bitmapRatio)
+
                     val totalMs = System.currentTimeMillis() - tTotal
                     // 尺寸守卫：loadThumbnail 可能返回 MICRO_KIND(96x96) 等极小缩略图，
-                    // 若尺寸不足目标的一半，回退手动解码保证清晰度
-                    val minAcceptableW = targetWidth / 2
-                    val minAcceptableH = targetHeight / 2
-                    if (bitmap.width >= minAcceptableW && bitmap.height >= minAcceptableH) {
+                    // 若尺寸不足目标的 1/3，方回退手动解码
+                    val minAcceptableW = adaptedSize.width / 3
+                    val minAcceptableH = adaptedSize.height / 3
+                    if (bitmap.width >= minAcceptableW && bitmap.height >= minAcceptableH && ratioDiff <= 0.2f) {
                         val flag = if (totalMs > 50) "🐢" else "  "
                         Log.i(TAG, "$flag [loadThumbnail] ${uriSegment} total=${totalMs}ms → ${bitmap.width}x${bitmap.height}")
                         return bitmap
                     }
-                    Log.w(TAG, "loadThumbnail too small (${bitmap.width}x${bitmap.height} < ${minAcceptableW}x${minAcceptableH}) for $uriSegment, fallback to manual decode")
+                    Log.w(TAG, "loadThumbnail rejected for $uriSegment: " +
+                            "${bitmap.width}x${bitmap.height} < ${minAcceptableW}x${minAcceptableH}" +
+                            " or ratioDiff=${String.format("%.2f", ratioDiff)} (orig=${rawW}x${rawH}), fallback to manual decode")
                     bitmap.recycle()
                 } else {
                     // loadThumbnail 返回 null（部分 ROM/文件格式没有预生成缩略图）
@@ -110,7 +136,9 @@ object ImageCompressor {
                 return null
             }
 
-            val targetSize = maxOf(targetWidth, targetHeight)
+            // Day 28：按原图比例计算自适应目标尺寸
+            val adaptedSize = adaptTargetSize(outWidth, outHeight, targetWidth, targetHeight)
+            val targetSize = maxOf(adaptedSize.width, adaptedSize.height)
             val sampleSize = calculateSampleSize(outWidth, outHeight, targetSize)
 
             // Step 2: 重新打开 fd 进行实际解码（第一次 openFileDescriptor 的 fd 指针已移动）
@@ -160,14 +188,31 @@ object ImageCompressor {
     }
 
     /**
+     * Day 28：按原图比例自适应目标尺寸。
+     * 将原图等比缩放到 [maxW]×[maxH] 边界内，保持宽高比不变。
+     *
+     * 例：4000×2000 原图 → maxW=1080, maxH=1080 → 结果 1080×540
+     *     2000×4000 原图 → maxW=1080, maxH=1080 → 结果 540×1080
+     *     4000×3000 原图 → maxW=400, maxH=400  → 结果 400×300
+     */
+    private fun adaptTargetSize(rawW: Int, rawH: Int, maxW: Int, maxH: Int): Size {
+        val scaleX = if (rawW > maxW) maxW.toFloat() / rawW else 1f
+        val scaleY = if (rawH > maxH) maxH.toFloat() / rawH else 1f
+        val scale = minOf(scaleX, scaleY)
+        val adaptedW = (rawW * scale).toInt().coerceAtLeast(1)
+        val adaptedH = (rawH * scale).toInt().coerceAtLeast(1)
+        return Size(adaptedW, adaptedH)
+    }
+
+    /**
      * 将 Bitmap 以 JPEG 格式压缩写入文件（供后续上传使用）。
      *
      * @param bitmap  源 Bitmap
      * @param output  目标文件
-     * @param quality JPEG 压缩质量 1-100，默认 80
+     * @param quality JPEG 压缩质量 1-100，默认 [DraftManager.THUMBNAIL_JPEG_QUALITY]
      * @return 写入的文件
      */
-    fun compressToFile(bitmap: Bitmap, output: File, quality: Int = 80): File {
+    fun compressToFile(bitmap: Bitmap, output: File, quality: Int = DraftManager.THUMBNAIL_JPEG_QUALITY): File {
         FileOutputStream(output).use { fos ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, quality, fos)
         }

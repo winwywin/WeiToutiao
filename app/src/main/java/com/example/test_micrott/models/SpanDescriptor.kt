@@ -1,7 +1,7 @@
 package com.example.test_micrott.models
 
 /**
- * 格式化 Span 描述符 — 用于旋转持久化。
+ * 格式化 Span 描述符。
  *
  * 通过自定义字符串序列化（无需 kotlinx-parcelize）存入 SavedStateHandle。
  * 格式: "start|end|type|value"

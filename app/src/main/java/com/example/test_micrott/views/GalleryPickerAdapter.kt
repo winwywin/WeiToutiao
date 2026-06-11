@@ -131,7 +131,7 @@ class GalleryPickerAdapter(
                     ImageCompressor.decodeSampledBitmap(
                         holder.itemView.context,
                         photo.uri,
-                        256, 256
+                        400, 400
                     )
                 }
                 val ioTime = System.currentTimeMillis() - tAfterSem

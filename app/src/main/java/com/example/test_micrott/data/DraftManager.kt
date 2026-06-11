@@ -1,5 +1,6 @@
 package com.example.test_micrott.data
 
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -32,6 +33,12 @@ class DraftManager(private val context: Context) : DraftRepository {
     companion object {
         private const val TAG = "DraftManager"
         private const val DRAFT_IMG_PREFIX = "draft_img"
+
+        /** 永久草稿数量上限，超过后自动删除最旧的记录 */
+        const val MAX_DRAFT_COUNT = 50
+
+        /** JPEG 压缩质量（缩略图 / 磁盘缓存共用） */
+        const val THUMBNAIL_JPEG_QUALITY = 85
     }
 
     private val dbHelper = DraftDatabaseHelper(context)
@@ -97,7 +104,7 @@ class DraftManager(private val context: Context) : DraftRepository {
     /**
      * 读取单条草稿的完整数据（用于恢复）。
      */
-    override fun getDraft(id: Long): DraftData? {
+    override suspend fun getDraft(id: Long): DraftData? = withContext(Dispatchers.IO) {
         val db = dbHelper.readableDatabase
         val cursor = db.rawQuery(
             "SELECT ${DraftDatabaseHelper.COL_TEXT}, " +
@@ -108,7 +115,7 @@ class DraftManager(private val context: Context) : DraftRepository {
             "WHERE ${DraftDatabaseHelper.COL_ID} = ?",
             arrayOf(id.toString())
         )
-        return cursor.use { c ->
+        cursor.use { c ->
             if (c.moveToFirst()) {
                 val text = c.getString(0)
                 val imagesJson = c.getString(1)
@@ -132,76 +139,113 @@ class DraftManager(private val context: Context) : DraftRepository {
      * 保存永久草稿（IO 操作，需在协程 IO 线程中调用）。
      * 来源：退出弹窗用户主动确认保存。
      *
-     * @return 新草稿的 id（-1 表示保存失败）
+     * @param updateDraftId 非 null 时 UPDATE 该记录（从草稿箱恢复后修改），null 时 INSERT 新记录
+     * @return 草稿 id（-1 表示保存失败）
      */
     override suspend fun saveDraft(
         text: String,
         imageUris: List<Uri>,
-        formatSpans: List<SpanDescriptor>
+        formatSpans: List<SpanDescriptor>,
+        updateDraftId: Long?
     ): Long = withContext(Dispatchers.IO) {
-        internalSave(text, imageUris, formatSpans, isTemporary = false)
+        internalSave(text, imageUris, formatSpans, isTemporary = false, updateDraftId = updateDraftId)
     }
 
     /**
      * 保存临时草稿（防抖机制，onPause 自动调用）。
      * is_temporary=1，后续 onResume 删除 / onStop 变永久。
+     *
+     * UPSERT 策略：如果已存在临时草稿 → UPDATE 它，否则 INSERT 新记录。
+     * 保证同时最多只有 1 条临时草稿，避免反复 INSERT 堆记录。
      */
     override suspend fun saveTemporaryDraft(
         text: String,
         imageUris: List<Uri>,
         formatSpans: List<SpanDescriptor>
     ): Long = withContext(Dispatchers.IO) {
-        internalSave(text, imageUris, formatSpans, isTemporary = true)
+        val db = dbHelper.writableDatabase
+        val existingTempId = findExistingTemporaryDraftId(db)
+        internalSave(text, imageUris, formatSpans, isTemporary = true, updateDraftId = existingTempId)
     }
 
-    /** 内部实现：写入草稿记录 */
+    /**
+     * 内部实现：写入或更新草稿记录。
+     *
+     * @param updateDraftId 非 null 时 UPDATE 该 id 的记录，null 时 INSERT 新记录
+     */
     private fun internalSave(
         text: String,
         imageUris: List<Uri>,
         formatSpans: List<SpanDescriptor>,
-        isTemporary: Boolean
+        isTemporary: Boolean,
+        updateDraftId: Long?
     ): Long {
         try {
             val savedAt = System.currentTimeMillis()
             val db = dbHelper.writableDatabase
 
-            // 事务包裹：图片复制 + DB 写入原子化
             db.beginTransaction()
             try {
-                // 图片路径 → JSONArray
-                val imagesJson = JSONArray()
+                // ── 1. 收集旧图片路径（UPDATE 时用于清理不再使用的文件） ──
+                val oldPaths: Set<String> = if (updateDraftId != null) {
+                    readImagePathsForDraft(db, updateDraftId)
+                } else emptySet()
+
+                // ── 2. 图片去重：已存在于私有目录的复用，新 URI 才复制 ──
+                val newPaths = mutableListOf<String>()
                 imageUris.forEach { uri ->
                     try {
-                        val path = copyImageToPrivate(uri, savedAt)
-                        imagesJson.put(path)
+                        val path = resolveImageToPrivatePath(uri, savedAt)
+                        newPaths.add(path)
                     } catch (e: Exception) {
-                        Log.w(TAG, "Failed to copy draft image: ${e.message}")
+                        Log.w(TAG, "Failed to resolve draft image: ${e.message}")
                     }
                 }
 
-                // Span → JSONArray
+                // ── 3. 清理不再使用的旧图片文件 ──
+                val newPathSet = newPaths.toSet()
+                oldPaths.filter { it !in newPathSet }.forEach { path ->
+                    File(path).delete()
+                    Log.v(TAG, "清理不再使用的图片: $path")
+                }
+
+                // ── 4. 序列化 ──
+                val imagesJson = JSONArray()
+                newPaths.forEach { imagesJson.put(it) }
+
                 val spansJson = JSONArray()
                 formatSpans.forEach { spansJson.put(it.serialize()) }
 
-                db.execSQL(
-                    "INSERT INTO ${DraftDatabaseHelper.TABLE_DRAFTS} " +
-                    "(${DraftDatabaseHelper.COL_TEXT}, ${DraftDatabaseHelper.COL_IMAGES_JSON}, " +
-                    "${DraftDatabaseHelper.COL_SPANS_JSON}, ${DraftDatabaseHelper.COL_SAVED_AT}, " +
-                    "${DraftDatabaseHelper.COL_IS_TEMPORARY}) " +
-                    "VALUES (?, ?, ?, ?, ?)",
-                    arrayOf<Any>(text, imagesJson.toString(), spansJson.toString(), savedAt, if (isTemporary) 1 else 0)
-                )
+                val values = ContentValues().apply {
+                    put(DraftDatabaseHelper.COL_TEXT, text)
+                    put(DraftDatabaseHelper.COL_IMAGES_JSON, imagesJson.toString())
+                    put(DraftDatabaseHelper.COL_SPANS_JSON, spansJson.toString())
+                    put(DraftDatabaseHelper.COL_SAVED_AT, savedAt)
+                    put(DraftDatabaseHelper.COL_IS_TEMPORARY, if (isTemporary) 1 else 0)
+                }
 
-                // 获取自增 id
-                val idCursor = db.rawQuery("SELECT last_insert_rowid()", null)
-                val id = idCursor.use { c ->
-                    if (c.moveToFirst()) c.getLong(0) else -1L
+                // ── 5. INSERT 或 UPDATE ──
+                val id: Long = if (updateDraftId != null) {
+                    db.update(
+                        DraftDatabaseHelper.TABLE_DRAFTS, values,
+                        "${DraftDatabaseHelper.COL_ID} = ?",
+                        arrayOf(updateDraftId.toString())
+                    )
+                    updateDraftId
+                } else {
+                    db.insert(DraftDatabaseHelper.TABLE_DRAFTS, null, values)
+                }
+
+                // ── 6. INSERT 后检查草稿数量上限 ──
+                if (!isTemporary && updateDraftId == null) {
+                    enforceDraftLimit(db)
                 }
 
                 db.setTransactionSuccessful()
 
                 val label = if (isTemporary) "临时" else "永久"
-                Log.d(TAG, "$label 草稿已保存: id=$id, text=${text.length}chars, images=${imageUris.size}")
+                val action = if (updateDraftId != null) "更新" else "新建"
+                Log.d(TAG, "$label 草稿已$action: id=$id, text=${text.length}chars, images=${imageUris.size}")
                 return id
             } finally {
                 db.endTransaction()
@@ -210,6 +254,84 @@ class DraftManager(private val context: Context) : DraftRepository {
             Log.w(TAG, "internalSave failed", e)
             return -1L
         }
+    }
+
+    /** 查找现有临时草稿的 id，不存在返回 null */
+    private fun findExistingTemporaryDraftId(db: android.database.sqlite.SQLiteDatabase): Long? {
+        val cursor = db.rawQuery(
+            "SELECT ${DraftDatabaseHelper.COL_ID} FROM ${DraftDatabaseHelper.TABLE_DRAFTS} " +
+            "WHERE ${DraftDatabaseHelper.COL_IS_TEMPORARY} = 1 LIMIT 1", null
+        )
+        return cursor.use { c ->
+            if (c.moveToFirst()) c.getLong(0) else null
+        }
+    }
+
+    /**
+     * 永久草稿超过 [MAX_DRAFT_COUNT] 条时，删除最旧的记录及关联图片。
+     * 仅在 INSERT 新永久草稿后调用（UPDATE 不改变数量）。
+     */
+    private fun enforceDraftLimit(db: android.database.sqlite.SQLiteDatabase) {
+        // 查出超限的最旧草稿 id
+        val cursor = db.rawQuery(
+            "SELECT ${DraftDatabaseHelper.COL_ID}, ${DraftDatabaseHelper.COL_IMAGES_JSON} " +
+            "FROM ${DraftDatabaseHelper.TABLE_DRAFTS} " +
+            "WHERE ${DraftDatabaseHelper.COL_IS_TEMPORARY} = 0 " +
+            "ORDER BY ${DraftDatabaseHelper.COL_SAVED_AT} DESC " +
+            "LIMIT -1 OFFSET $MAX_DRAFT_COUNT",
+            null
+        )
+        val toDelete = mutableListOf<Pair<Long, String?>>()
+        cursor.use { c ->
+            while (c.moveToNext()) {
+                toDelete.add(c.getLong(0) to c.getString(1))
+            }
+        }
+        if (toDelete.isEmpty()) return
+
+        toDelete.forEach { (draftId, imagesJson) ->
+            db.delete(DraftDatabaseHelper.TABLE_DRAFTS,
+                "${DraftDatabaseHelper.COL_ID} = ?",
+                arrayOf(draftId.toString()))
+            imagesJson?.let { deleteImageFiles(it) }
+        }
+        Log.d(TAG, "草稿数量超限，已清理 ${toDelete.size} 条最旧草稿")
+    }
+
+    /** 读取指定草稿的图片路径集合（用于 UPDATE 时做差量清理） */
+    private fun readImagePathsForDraft(db: android.database.sqlite.SQLiteDatabase, draftId: Long): Set<String> {
+        val cursor = db.rawQuery(
+            "SELECT ${DraftDatabaseHelper.COL_IMAGES_JSON} FROM ${DraftDatabaseHelper.TABLE_DRAFTS} " +
+            "WHERE ${DraftDatabaseHelper.COL_ID} = ?", arrayOf(draftId.toString())
+        )
+        return cursor.use { c ->
+            if (c.moveToFirst()) {
+                val json = c.getString(0)
+                try {
+                    val arr = JSONArray(json)
+                    (0 until arr.length()).map { arr.getString(it) }.toSet()
+                } catch (_: Exception) { emptySet() }
+            } else emptySet()
+        }
+    }
+
+    /**
+     * 图片去重：如果 URI 已经指向私有目录中的文件则直接复用，否则复制。
+     *
+     * 典型场景：
+     * - 恢复草稿后图片是 file:// → 直接复用（零 IO）
+     * - 新选的图片是 content:// → 复制到私有目录
+     */
+    private fun resolveImageToPrivatePath(uri: Uri, savedAt: Long): String {
+        if (uri.scheme == "file") {
+            val path = uri.path ?: return copyImageToPrivate(uri, savedAt)
+            val file = File(path)
+            // 已在私有目录且文件存在 → 复用
+            if (file.exists() && file.parentFile == draftImgDir) {
+                return path
+            }
+        }
+        return copyImageToPrivate(uri, savedAt)
     }
 
     /**
@@ -323,14 +445,19 @@ class DraftManager(private val context: Context) : DraftRepository {
         return destFile.absolutePath
     }
 
-    /** JSONArray 路径 → Uri 列表（过滤已删除文件） */
+    /** JSONArray 路径 → Uri 列表（过滤已删除文件，丢失时打 Log.w） */
     private fun parseImagePaths(imagesJson: String): List<Uri> {
         return try {
             val arr = JSONArray(imagesJson)
             (0 until arr.length()).mapNotNull { i ->
                 val path = arr.getString(i)
                 val file = File(path)
-                if (file.exists()) Uri.fromFile(file) else null
+                if (file.exists()) {
+                    Uri.fromFile(file)
+                } else {
+                    Log.w(TAG, "Draft image file missing: $path")
+                    null
+                }
             }
         } catch (_: Exception) { emptyList() }
     }

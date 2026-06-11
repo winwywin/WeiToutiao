@@ -45,9 +45,8 @@ class MvcTestActivity : AppCompatActivity() {
     private lateinit var rvImages: RecyclerView
     private lateinit var imageGridAdapter: ImageGridAdapter
 
-    // A9 SpanWatcher：#话题# / @提及 块删除守卫
-    private lateinit var spanWatcher: SpanWatcher
-
+    // A9 SpanWatcher：#话题# / @提及 块删除守卫（MVC 沙盒仍使用独立 SpanWatcher）
+    private var spanWatcher: SpanWatcher? = null
 
     // day2:用于暂存当前选中的图片 Uri 列表（沙盒阶段临时记录）
 //    private var selectedImageUris = listOf<android.net.Uri>()

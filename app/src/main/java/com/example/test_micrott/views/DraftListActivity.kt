@@ -11,8 +11,9 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.test_micrott.R
-import com.example.test_micrott.data.DraftManager
-import com.example.test_micrott.data.DraftSummary
+import com.example.test_micrott.di.App
+import com.example.test_micrott.repository.DraftRepository
+import com.example.test_micrott.repository.DraftSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -30,7 +31,7 @@ class DraftListActivity : AppCompatActivity() {
         const val EXTRA_RESTORED_DRAFT_ID = "restored_draft_id"
     }
 
-    private lateinit var draftManager: DraftManager
+    private lateinit var draftManager: DraftRepository
     private lateinit var adapter: DraftListAdapter
     private var isManageMode = false
     private var drafts: List<DraftSummary> = emptyList()
@@ -39,7 +40,7 @@ class DraftListActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_draft_list)
 
-        draftManager = DraftManager(applicationContext)
+        draftManager = (applicationContext as App).container.draftRepository
 
         findViewById<TextView>(R.id.btn_back).setOnClickListener {
             finish()

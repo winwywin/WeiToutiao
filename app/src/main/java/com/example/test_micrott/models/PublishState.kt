@@ -52,10 +52,14 @@ data class PublishState(
     val publishResultImageCount: Int = 0,
     // Day 22+：编辑器是否已被"触碰"过（选图/点输入框），用于按钮状态切换
     val isEditorTouched: Boolean = false,
-    // Day 21+：话题选择器
+    // Day 21+：话题列表（话题选择器的显隐由独立 StateFlow 管理）
     val hotTopics: List<TopicItem> = TopicItem.DEFAULT_HOT_TOPICS,
-    val showTopicPicker: Boolean = false,
+    // 退出保存完成信号：ViewModel 保存草稿完毕后置 true，View 观察后 finish()
+    val shouldFinish: Boolean = false,
 ) {
+    /** 是否有需要保存的内容（供 View 层判断是否弹出退出确认框） */
+    val hasContent: Boolean get() = text.isNotBlank() || selectedImages.isNotEmpty()
+
     companion object {
         /** 微头条字数上限（与今日头条一致） */
         const val MAX_CHAR_LIMIT = 2000
