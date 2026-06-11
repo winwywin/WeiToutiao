@@ -25,3 +25,4 @@ reasonix.toml
 .gradle_home/
 .idea/codeStyles/
 .workbuddy/
+/build/
