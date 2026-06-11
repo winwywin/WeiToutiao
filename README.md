@@ -23,6 +23,11 @@
 
 ## 架构图
 
+![MVI 架构图](screenshots/architecture_mvi.svg)
+
+<details>
+<summary>Mermaid 源码（GitHub 自动渲染）</summary>
+
 ```mermaid
 flowchart TD
     User["用户操作\n(点击/输入/拖拽)"]
@@ -43,6 +48,8 @@ flowchart TD
     VM -.->|仅发布时| Data
     VM -.->|仅草稿保存时| Data
 ```
+
+</details>
 
 **MVI 单向数据流**：
 1. View 接收用户操作，转换为 `PublishIntent` 发送给 ViewModel
