@@ -97,6 +97,39 @@
 
 ---
 
+## CPU Profiler 轨迹分析（Sampling 模式）
+
+录制场景：应用已在发布页 → 开始录制 → 进入相册选 9 张图 → 确认返回 → 图片加载完成后停止录制，总时长约 18 秒。
+
+### main 线程视图
+
+![CPU Trace — main 线程](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_cpu_main_thread.png)
+
+- 时间轴：0~18 秒，main 线程以密集的橙色短采样点为主
+- 0~3 秒：选图点击期间主线程活跃（UI 事件响应）
+- 3~6 秒及之后：采样点密度明显降低，存在空闲间隙
+- **关键判断**：没有出现长达数百毫秒的连续阻塞条，证明选图加载期间主线程未被同步解码阻塞
+
+### DefaultDispatcher-worker 视图
+
+![CPU Trace — DefaultDispatcher](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_cpu_dispatcher.png)
+
+- 共观察到 6 个 `DefaultDispatcher-worker` 线程在不同时段出现绿色采样块
+- 绿色块集中在 ~2 秒、~3 秒、~4 秒时刻，与 9 张图并行解码的时间窗口吻合
+- 多个 worker 交替活跃，但同一时刻仅 2~3 个同时有采样点 → 与代码中 `Semaphore(3)` 的并发限制一致
+- 线程空闲时显示为空白（或极短采样点），无持续占用
+
+### 结论
+
+| 验证项 | 结果 |
+|--------|------|
+| 图片解码线程 | ✅ 在 `DefaultDispatcher-worker`（`Dispatchers.IO`）上执行 |
+| 主线程阻塞 | ✅ 无长时连续阻塞，UI 事件正常响应 |
+| 并发控制 | ✅ 约 2~3 个 worker 同时活跃，与 `Semaphore(3)` 吻合 |
+| 线程泄漏 | ✅ 8 核线程池正常工作，无额外线程创建 |
+
+---
+
 ## 缓存效率分析
 
 ### ThumbnailCache 命中率预估
@@ -124,7 +157,8 @@
 | 2 | 基线内存 (AS Profiler) | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_baseline.png) |
 | 3 | 9 图加载后内存 | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_9images.png) |
 | 4 | Heap Dump (Bitmap 过滤) | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_heapdump_9images.png) |
-| 5 | CPU Profiler 轨迹 | ⏳ 待补充 |
+| 5 | CPU Trace — main 线程 | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_cpu_main_thread.png) |
+| 6 | CPU Trace — DefaultDispatcher | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_cpu_dispatcher.png) |
 
 ## 性能对比（参考值）
 
@@ -158,5 +192,5 @@ python mem_monitor.py
 
 1. **未 OOM**：9 图场景下 Peak 191 MB（PSS），稳定态 155-157 MB，未达到 Android 典型堆上限
 2. **无泄漏**：Native Heap 回落 67%，Graphics 回落 52%，GC 行为正常，Heap Dump 仅 3 个 Bitmap 实例
-3. **UI 流畅**：Profiler CPU 曲线显示主线程接近空闲，`Dispatchers.IO` 协程池 + `Semaphore(3)` 有效隔离解码负载
+3. **UI 流畅**：CPU Trace 验证 main 线程无长时阻塞，DefaultDispatcher-worker 承担全部解码负载，`Semaphore(3)` 限制并发约 2~3 线程
 4. **缓存有效**：L1 内存在同一生命周期内完全覆盖 9 图缩略图，无需回退磁盘
