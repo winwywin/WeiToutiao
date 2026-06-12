@@ -11,7 +11,7 @@
 | 设备 | Android 模拟器 (API 36) |
 | 测试工具 1 | 自研 `tools/mem_monitor.py`（每秒 `adb dumpsys meminfo` + `top`） |
 | 测试工具 2 | **Android Studio Profiler**（Memory 时间线 + Heap Dump） |
-| 数据文件 | [`mem_profile_20260609_201734.csv`](mem_profile_20260609_201734.csv)（46 个采样点，~77 秒） |
+| 数据文件 | [`mem_profile_20260609_201734.csv`](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/mem_profile_20260609_201734.csv)（46 个采样点，~77 秒） |
 | 测试场景 | 9 图全选 → 发布器编辑 → 返回相册 → 退出 |
 
 ---
@@ -79,11 +79,13 @@
 2. **实际像素内存 = Profiler 时间线中的 Native + Graphics**：时间线显示 Native 41.7 MB + Graphics 45.2 MB，这部分才是 9 张图的像素真正占用——全部在 Native 层，Java Heap 零负担。
 3. **若存在泄露，会看到大量 Bitmap 实例堆积**。当前仅 3 个实例，排除泄露可能。
 
-**Heap Dump 截图**：[`screenshots/performance/profiler_heapdump_9images.png`](screenshots/performance/profiler_heapdump_9images.png)
+**Heap Dump 截图**：[`screenshots/performance/profiler_heapdump_9images.png`](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_heapdump_9images.png)
 
 ---
 
-## AS Profiler 时间线特征（`profiler_timeline_full.png`）
+## AS Profiler 时间线特征
+
+![Memory Profiler 时间线](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_timeline_full.png)
 
 截图 `profiler_timeline_full.png` 包含完整的 CPU + Memory 时间线，可观察到：
 
@@ -112,6 +114,18 @@
 
 ---
 
+## Profiler 截图清单（GitHub 直链）
+
+截图存放于 `screenshots/performance/` 目录，以下链接可直接在浏览器打开或粘贴到飞书文档：
+
+| # | 截图 | 链接 |
+|---|------|------|
+| 1 | Memory Profiler 时间线 | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_timeline_full.png) |
+| 2 | 基线内存 (AS Profiler) | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_baseline.png) |
+| 3 | 9 图加载后内存 | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_9images.png) |
+| 4 | Heap Dump (Bitmap 过滤) | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_heapdump_9images.png) |
+| 5 | CPU Profiler 轨迹 | ⏳ 待补充 |
+
 ## 性能对比（参考值）
 
 | 指标 | 本应用 | 参考值（典型发布器 App） |
@@ -122,20 +136,6 @@
 | GC 行为 | 正常，无频繁触发 | — |
 
 > ① 参考值为开发者经验区间，非严格 benchmark。本应用自研缩略图和缓存对内存占用有明显控制。
-
----
-
-## Profiler 截图清单
-
-| # | 截图 | 文件 | 状态 |
-|---|------|------|------|
-| 1 | Memory Profiler 时间线 | `profiler_timeline_full.png` | ✅ 已提交 |
-| 2 | 基线内存（AS Profiler） | `profiler_baseline.png` | ✅ 已提交 |
-| 3 | 9 图加载后内存 | `profiler_9images.png` | ✅ 已提交 |
-| 4 | **Heap Dump（Bitmap 过滤）** | `profiler_heapdump_9images.png` | ✅ 已提交 |
-| 5 | **CPU Profiler 轨迹** | — | ⏳ 待补充（需在 AS Profiler 录制解码流程后截图） |
-
-截图均存放于 `screenshots/performance/` 目录。
 
 ---
 
