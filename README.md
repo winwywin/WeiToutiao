@@ -171,7 +171,7 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 | `9bcaf86` | SQLite 幽灵字段清理 + 事务包裹 `beginTransaction/endTransaction` |
 | `1fb8375` | **Day 28 大提交**：`di/domain/repository` 模块 + `DiskThumbnailCache` + `RichEditText` 封装 + `ImageCompressor` 比例自适应 + 阈值放宽 + `NineGridLayout` 接口化 |
 
-**总 Commit 数：51**（远超要求的 ≥30）
+**总 Commit 数：52**（远超要求的 ≥30）
 
 ---
 
@@ -179,6 +179,7 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 | 文件 | 说明 |
 |---|---|
+| [`TECHNICAL_DESIGN.md`](TECHNICAL_DESIGN.md) | **技术方案文档**：整体架构图、核心技术方案、难点解决、技术亮点 |
 | [`README.md`](README.md) | 项目概述、功能清单、架构图、技术栈 |
 | [`DECISIONS.md`](DECISIONS.md) | 10 篇架构决策记录（ADR 格式） |
 | [`AI_USAGE.md`](AI_USAGE.md) | 7 个 AI 交互案例（场景→AI 方案+概念解释→决策+理由→新问题→排查→解决） |
