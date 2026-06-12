@@ -147,18 +147,25 @@
 
 ---
 
-## Profiler 截图清单（GitHub 直链）
+## Profiler 截图总览
 
-截图存放于 `screenshots/performance/` 目录，以下链接可直接在浏览器打开或粘贴到飞书文档：
+![Memory Profiler 时间线](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_timeline_full.png)
+*图1：Memory Profiler 完整时间线（含进程生命周期、CPU、MEMORY 堆叠面积图）*
 
-| # | 截图 | 链接 |
-|---|------|------|
-| 1 | Memory Profiler 时间线 | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_timeline_full.png) |
-| 2 | 基线内存 (AS Profiler) | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_baseline.png) |
-| 3 | 9 图加载后内存 | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_9images.png) |
-| 4 | Heap Dump (Bitmap 过滤) | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_heapdump_9images.png) |
-| 5 | CPU Trace — main 线程 | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_cpu_main_thread.png) |
-| 6 | CPU Trace — DefaultDispatcher | [查看](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_cpu_dispatcher.png) |
+![基线内存 (AS Profiler)](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_baseline.png)
+*图2：基线内存，刚打开应用 Total 105.9 MB*
+
+![9 图加载后内存](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_9images.png)
+*图3：加载 9 张图后 Total 151.1 MB*
+
+![Heap Dump (Bitmap 过滤)](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_heapdump_9images.png)
+*图4：Heap Dump 堆转储，Bitmap 仅 3 个实例*
+
+![CPU Trace — main 线程](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_cpu_main_thread.png)
+*图5：CPU Trace — main 线程，无连续阻塞*
+
+![CPU Trace — DefaultDispatcher](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_cpu_dispatcher.png)
+*图6：CPU Trace — DefaultDispatcher，绿色块为解码任务，与 Semaphore(3) 并发限制一致*
 
 ## 性能对比（参考值）
 
