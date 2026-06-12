@@ -30,6 +30,9 @@
 | Native Heap | ~18 MB | — | **36.8 MB** |
 | Graphics | ~13 MB | — | **91.9 MB** |
 
+![基线内存 (AS Profiler)](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_baseline.png)
+*基线内存截图：刚打开应用 Total 105.9 MB*
+
 ---
 
 ## 内存趋势分析（mem_monitor PSS 口径）
@@ -61,6 +64,9 @@
 
 **结论**：四类可回收内存均显著回落，**未发现内存泄漏信号**。
 
+![9 图加载后内存](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_9images.png)
+*9 图加载后内存截图：Total 151.1 MB*
+
 ---
 
 ## Heap Dump 分析（AS Profiler）
@@ -78,6 +84,9 @@
 1. **Bitmap 像素数据不在 Java Heap**：Android 8.0+ 将 Bitmap 像素分配在 Native Heap 中，Java Heap 里只保留极小的 wrapper 对象。3 个实例 / 2.3 KB 是正常水平。
 2. **实际像素内存 = Profiler 时间线中的 Native + Graphics**：时间线显示 Native 41.7 MB + Graphics 45.2 MB，这部分才是 9 张图的像素真正占用——全部在 Native 层，Java Heap 零负担。
 3. **若存在泄露，会看到大量 Bitmap 实例堆积**。当前仅 3 个实例，排除泄露可能。
+
+![Heap Dump (Bitmap 过滤)](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_heapdump_9images.png)
+*Heap Dump 截图：Bitmap 仅 3 个实例*
 
 **Heap Dump 截图**：[`screenshots/performance/profiler_heapdump_9images.png`](https://raw.githubusercontent.com/winwywin/WeiToutiao/master/screenshots/performance/profiler_heapdump_9images.png)
 
