@@ -28,11 +28,6 @@
             android:exported="false"
             android:screenOrientation="portrait" />
         <activity
-            android:name=".views.GalleryPickerActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Test_microTT"
-            android:screenOrientation="portrait" />
-        <activity
             android:name=".views.ImagePreviewActivity"
             android:exported="false"
             android:theme="@style/Theme.Test_microTT"

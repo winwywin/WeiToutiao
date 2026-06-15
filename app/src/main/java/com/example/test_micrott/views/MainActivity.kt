@@ -4,13 +4,10 @@ package com.example.test_micrott.views
 // 1. Android 系统与 Jetpack 官方核心依赖库导入区
 // ==========================================
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.provider.MediaStore
 import android.util.Log
 import android.view.View
 import androidx.activity.OnBackPressedCallback
@@ -19,16 +16,16 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.toColorInt
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.bumptech.glide.Glide
+import com.luck.picture.lib.basic.PictureSelector
+import com.luck.picture.lib.config.SelectMimeType
+import com.luck.picture.lib.entity.LocalMedia
+import com.luck.picture.lib.interfaces.OnResultCallbackListener
 
 // ==========================================
 // 2. 本地项目业务组件导入
 // ==========================================
 import com.example.test_micrott.R
-import com.example.test_micrott.data.ImageCompressor
 import com.example.test_micrott.databinding.ActivityMainBinding
 import com.example.test_micrott.models.PublishIntent
 import com.example.test_micrott.models.PublishState
@@ -70,13 +67,19 @@ class MainActivity : AppCompatActivity() {
     // Activity Result Launchers
     // ========================================================================
 
-    private val pickMultipleMedia = registerForActivityResult(
-        GalleryPickerContract()
-    ) { resultUris ->
-        if (!resultUris.isNullOrEmpty()) {
-            Log.d(tag, "📷 [View] 自定义相册返回 ${resultUris.size} 张")
-            viewModel.sendIntent(PublishIntent.Image.ImagesPicked(resultUris))
-        } else {
+    /** PictureSelector 选图结果回调 */
+    private val pictureSelectorCallback = object : OnResultCallbackListener<LocalMedia> {
+        override fun onResult(result: ArrayList<LocalMedia>?) {
+            if (!result.isNullOrEmpty()) {
+                val uris = result.map { it.uri ?: Uri.parse(it.path) }
+                Log.d(tag, "📷 [View] PictureSelector 返回 ${uris.size} 张")
+                viewModel.sendIntent(PublishIntent.Image.ImagesPicked(uris))
+            } else {
+                Log.d(tag, "用户取消了相册选择")
+            }
+        }
+
+        override fun onCancel() {
             Log.d(tag, "用户取消了相册选择")
         }
     }
@@ -94,25 +97,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            Log.d(tag, "📷 [View] 照片权限已授予，启动自定义相册")
-            launchGalleryPicker()
-        } else {
-            Log.d(tag, "📷 [View] 用户拒绝照片权限")
-            android.widget.Toast.makeText(this, "需要照片权限才能选择图片", android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private val photoPermission: String
-        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Manifest.permission.READ_MEDIA_IMAGES
-        } else {
-            Manifest.permission.READ_EXTERNAL_STORAGE
-        }
 
     // ========================================================================
     // 生命周期
@@ -187,10 +171,23 @@ class MainActivity : AppCompatActivity() {
     private fun initRecyclerView() {
         nineGridLayout = findViewById(R.id.grid_image_container)
         nineGridLayout.thumbnailLoader = NineGridLayout.ThumbnailLoader { uri, targetW, targetH, onLoaded ->
-            lifecycleScope.launch(Dispatchers.IO) {
-                val bitmap = ImageCompressor.decodeSampledBitmap(this@MainActivity, uri, targetW, targetH)
-                withContext(Dispatchers.Main) { onLoaded(bitmap) }
-            }
+            // Glide 异步加载缩略图
+            Glide.with(this@MainActivity)
+                .asBitmap()
+                .load(uri)
+                .override(targetW, targetH)
+                .centerCrop()
+                .into(object : com.bumptech.glide.request.target.CustomTarget<Bitmap>() {
+                    override fun onResourceReady(resource: Bitmap, transition: com.bumptech.glide.request.transition.Transition<in Bitmap>?) {
+                        onLoaded(resource)
+                    }
+                    override fun onLoadCleared(placeholder: android.graphics.drawable.Drawable?) {
+                        onLoaded(null)
+                    }
+                    override fun onLoadFailed(errorDrawable: android.graphics.drawable.Drawable?) {
+                        onLoaded(null)
+                    }
+                })
         }
         nineGridLayout.onAddClick = { tryPickPhotos() }
         nineGridLayout.onDeleteClick = { index -> viewModel.sendIntent(PublishIntent.Image.RemoveImage(index)) }
@@ -204,46 +201,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ========================================================================
-    // 初始化：照片选择
+    // 初始化：照片选择（PictureSelector 第三方库）
     // ========================================================================
 
     private fun tryPickPhotos() {
-        if (checkSelfPermission(photoPermission) == PackageManager.PERMISSION_GRANTED) {
-            launchGalleryPicker()
-        } else {
-            Log.d(tag, "📷 [View] 照片权限未授予，请求中...")
-            requestPermissionLauncher.launch(photoPermission)
-        }
-    }
-
-    private fun launchGalleryPicker() {
         val currentImages = nineGridLayout.getImages()
         val maxSlots = 9 - currentImages.size
         if (maxSlots <= 0) {
             Log.d(tag, "📷 [View] 已达 9 张上限，阻止相册启动")
             return
         }
-        val preSelectedIds = extractMediaIds(currentImages)
-        Log.d(tag, "📷 [View] 启动自定义相册，剩余名额 $maxSlots，已选 ${preSelectedIds.size} 张")
+        Log.d(tag, "📷 [View] 启动 PictureSelector，剩余名额 $maxSlots")
         viewModel.sendIntent(PublishIntent.Internal.LaunchInternalActivity)
-        pickMultipleMedia.launch(PickConfig(maxSelectable = maxSlots, preSelectedIds = preSelectedIds))
-    }
 
-    private fun extractMediaIds(uris: List<Uri>): List<Long> {
-        return uris.mapNotNull { uri ->
-            try {
-                uri.lastPathSegment?.toLong()
-            } catch (_: NumberFormatException) {
-                val cursor = contentResolver.query(
-                    uri,
-                    arrayOf(MediaStore.Images.Media._ID),
-                    null, null, null
-                )
-                cursor?.use {
-                    if (it.moveToFirst()) it.getLong(0) else null
-                }
-            }
-        }
+        PictureSelector.create(this)
+            .openGallery(SelectMimeType.ofImage())
+            .setImageEngine(com.luck.picture.lib.engine.GlideEngine.createGlideEngine())
+            .setMaxSelectNum(9)
+            .setMinSelectNum(0)
+            .isCamera(false)
+            .isPreviewImage(true)
+            .isZoomAnim(true)
+            .setSelectorUIStyle(com.luck.picture.lib.config.SelectorStyle.MATCH_PARENT)
+            .forResult(pictureSelectorCallback)
     }
 
     private fun launchImagePreview(position: Int) {

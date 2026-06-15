@@ -101,6 +101,12 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
 
     // ========================================================================
+    // PictureSelector + Glide：第三方相册选择器（替换自研 GalleryPicker）
+    // ========================================================================
+    implementation("io.github.lucksiege:pictureselector:v3.11.3")
+    implementation("com.github.bumptech.glide:glide:4.16.0")
+
+    // ========================================================================
     // LeakCanary：运行时内存泄漏自动检测（仅 debug 构建包含）
     // ========================================================================
     debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
